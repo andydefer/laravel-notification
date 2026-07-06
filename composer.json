@@ -1,0 +1,48 @@
+{
+    "name": "andydefer/laravel-notification",
+    "description": "Extensible polymorphic notification system for Laravel with multi-channel support (Mail, Database, SMS, WhatsApp, etc.)",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "AndyDefer\\LaravelNotification\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AndyDefer\\LaravelNotification\\Tests\\": "tests/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Andy Kani",
+            "email": "andykanidimbu@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "andydefer/laravel-task": "^4.0"
+    },
+    "require-dev": {
+        "barryvdh/laravel-ide-helper": "^3.6",
+        "larastan/larastan": "^3.8",
+        "laravel/pint": "^1.26",
+        "orchestra/testbench": "^10.8",
+        "phpunit/phpunit": "^12.5",
+        "rector/rector": "*",
+        "vimeo/psalm": "^6.14"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "AndyDefer\\LaravelNotification\\NotificationServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test-unit": "phpunit --testsuite=unit",
+        "test-integration": "phpunit --testsuite=integration"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
