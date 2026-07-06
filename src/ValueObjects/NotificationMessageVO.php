@@ -7,7 +7,7 @@ namespace AndyDefer\LaravelNotification\ValueObjects;
 use AndyDefer\DomainStructures\Abstracts\AbstractValueObject;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 
-final class NotificationMessageVO extends AbstractValueObject
+class NotificationMessageVO extends AbstractValueObject
 {
     public readonly MessageBodyVO $body;
 
