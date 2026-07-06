@@ -45,11 +45,13 @@ final class SendRecurringNotificationTaskTest extends TestCase
     {
         parent::setUp();
 
+        // Arrange : Create a test user
         $this->user = TestUser::create([
             'name' => 'John Doe',
             'email' => 'john@example.com',
         ]);
 
+        // Arrange : Get services from container
         $this->notificationService = $this->app->make(NotificationServiceInterface::class);
 
         $debugRepository = new TaskExecutionDebugRepository;
@@ -100,6 +102,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
     public function test_register_and_execute_task_when_playing(): void
     {
+        // Arrange : Freeze time and create task data
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -116,19 +119,22 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
             $config
         );
 
+        $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Verify task was executed successfully
         $this->assertInstanceOf(TaskAliasVO::class, $alias);
 
         $taskModel = $this->recurringTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(RecurringTaskStatus::PLAYING, $taskModel->getStatus());
 
-        $result = $this->recurringTaskService->run($alias);
         $this->assertTrue($result->success);
 
         $updatedTask = $this->recurringTaskRepository->findByAlias($alias);
@@ -143,6 +149,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
     public function test_task_not_executed_when_waiting(): void
     {
+        // Arrange : Freeze time and create task in WAITING state
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -158,17 +165,22 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->addHours(2)->toIso8601String())
         );
 
+        // Act : Register the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
             $config
         );
 
+        // Assert : Task should be WAITING
         $taskModel = $this->recurringTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(RecurringTaskStatus::WAITING, $taskModel->getStatus());
 
+        // Act : Try to run the task
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should not execute
         $this->assertFalse($result->success);
 
         $updatedTask = $this->recurringTaskRepository->findByAlias($alias);
@@ -178,6 +190,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
     public function test_task_not_executed_when_finished(): void
     {
+        // Arrange : Freeze time and create task in FINISHED state
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -194,22 +207,28 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(1)->toIso8601String())
         );
 
+        // Act : Register the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
             $config
         );
 
+        // Assert : Task should be FINISHED
         $taskModel = $this->recurringTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(RecurringTaskStatus::FINISHED, $taskModel->getStatus());
 
+        // Act : Try to run the task
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should not execute
         $this->assertFalse($result->success);
     }
 
     public function test_task_not_executed_when_paused(): void
     {
+        // Arrange : Freeze time and create task in PAUSED state
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -225,6 +244,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and pause the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
@@ -233,16 +253,21 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
         $this->recurringTaskService->pause($alias);
 
+        // Assert : Task should be PAUSED
         $taskModel = $this->recurringTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(RecurringTaskStatus::PAUSED, $taskModel->getStatus());
 
+        // Act : Try to run the task
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should not execute
         $this->assertFalse($result->success);
     }
 
     public function test_task_fails_when_notifiable_not_found(): void
     {
+        // Arrange : Freeze time and create task with non-existent notifiable
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -262,6 +287,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
@@ -273,6 +299,8 @@ final class SendRecurringNotificationTaskTest extends TestCase
         $this->assertEquals(RecurringTaskStatus::PLAYING, $taskModel->getStatus());
 
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should fail
         $this->assertFalse($result->success);
 
         $updatedTask = $this->recurringTaskRepository->findByAlias($alias);
@@ -281,6 +309,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
     public function test_register_and_execute_with_channels(): void
     {
+        // Arrange : Freeze time and create task with channels
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -296,6 +325,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
@@ -307,6 +337,8 @@ final class SendRecurringNotificationTaskTest extends TestCase
         $this->assertEquals(RecurringTaskStatus::PLAYING, $taskModel->getStatus());
 
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should succeed and create notification
         $this->assertTrue($result->success);
 
         $this->assertDatabaseHas('notifications', [
@@ -317,6 +349,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
     public function test_register_and_execute_with_channel_collection(): void
     {
+        // Arrange : Freeze time and create task with channel collection
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -338,6 +371,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
@@ -349,6 +383,8 @@ final class SendRecurringNotificationTaskTest extends TestCase
         $this->assertEquals(RecurringTaskStatus::PLAYING, $taskModel->getStatus());
 
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should succeed and create notification
         $this->assertTrue($result->success);
 
         $this->assertDatabaseHas('notifications', [
@@ -359,6 +395,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
 
     public function test_task_fails_when_class_not_found(): void
     {
+        // Arrange : Freeze time and create task with non-existent class
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -378,6 +415,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
@@ -389,11 +427,14 @@ final class SendRecurringNotificationTaskTest extends TestCase
         $this->assertEquals(RecurringTaskStatus::PLAYING, $taskModel->getStatus());
 
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should fail
         $this->assertFalse($result->success);
     }
 
     public function test_task_validates_payload_before_execution(): void
     {
+        // Arrange : Freeze time and create task without body (invalid)
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -413,6 +454,7 @@ final class SendRecurringNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->recurringTaskService->register(
             new RecurringTaskFqcnVO(SendRecurringNotificationTask::class),
             $payload,
@@ -420,6 +462,8 @@ final class SendRecurringNotificationTaskTest extends TestCase
         );
 
         $result = $this->recurringTaskService->run($alias);
+
+        // Assert : Task should fail validation
         $this->assertFalse($result->success);
     }
 }

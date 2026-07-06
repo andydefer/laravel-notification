@@ -29,6 +29,7 @@ final class MailDriverTest extends TestCase
     {
         parent::setUp();
 
+        // Arrange : Create configuration and route
         $this->config = new MailConfigRecord(
             enabled: true,
             default_from: 'noreply@example.com',
@@ -63,6 +64,7 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_sends_mail(): void
     {
+        // Arrange : Clear log and create a message
         $this->clearLog();
 
         $message = new NotificationMessageVO(
@@ -71,8 +73,10 @@ final class MailDriverTest extends TestCase
             type: 'test'
         );
 
+        // Act : Send the notification
         $result = $this->driver->send($message, $this->route);
 
+        // Assert : Verify the result and log content
         $this->assertTrue($result->success);
         $this->assertEquals(MailChannel::class, $result->channel->getValue());
         $this->assertEquals('john@example.com', $result->destination);
@@ -86,6 +90,7 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_sends_mail_with_from_config(): void
     {
+        // Arrange : Clear log and create a message
         $this->clearLog();
 
         $message = new NotificationMessageVO(
@@ -94,8 +99,10 @@ final class MailDriverTest extends TestCase
             type: 'test'
         );
 
+        // Act : Send the notification
         $this->driver->send($message, $this->route);
 
+        // Assert : Verify log content contains the from address
         $logContent = $this->getLogContent();
         $this->assertStringContainsString('Test Body', $logContent);
         $this->assertStringContainsString('Test Subject', $logContent);
@@ -104,57 +111,82 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_throws_exception_when_destination_empty(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Destination cannot be empty.');
-
-        $route = new NotificationRouteVO(
-            channelClass: MailChannel::class,
-            destination: ''
-        );
-
+        // Arrange : Create a message
         $message = new NotificationMessageVO(
             body: new MessageBodyVO('Test Body'),
             subject: new MessageSubjectVO('Test Subject'),
             type: 'test'
         );
 
-        $this->driver->send($message, $route);
+        // Expect : Exception should be thrown when creating the route with empty destination
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Destination cannot be empty.');
+
+        // Act : Create a route with empty destination (this will throw the exception)
+        $route = new NotificationRouteVO(
+            channelClass: MailChannel::class,
+            destination: ''
+        );
+
+        // Note: The exception is thrown in the constructor of NotificationRouteVO
+        // so the send() method is never reached
     }
 
     public function test_get_channel_returns_mail(): void
     {
-        $this->assertEquals('mail', $this->driver->getChannel());
+        // Arrange & Act : Get the channel name
+        $channel = $this->driver->getChannel();
+
+        // Assert : Verify the channel name
+        $this->assertEquals('mail', $channel);
     }
 
     public function test_validate_configuration_with_valid_config(): void
     {
-        $this->assertTrue($this->driver->validateConfiguration());
+        // Arrange : Configuration already has valid values
+
+        // Act : Validate the configuration
+        $isValid = $this->driver->validateConfiguration();
+
+        // Assert : Verify the configuration is valid
+        $this->assertTrue($isValid);
     }
 
     public function test_validate_configuration_when_disabled(): void
     {
+        // Arrange : Create a disabled configuration
         $config = new MailConfigRecord(
             enabled: false,
             default_from: 'test@example.com'
         );
         $driver = new MailDriver($config);
 
-        $this->assertFalse($driver->validateConfiguration());
+        // Act : Validate the configuration
+        $isValid = $driver->validateConfiguration();
+
+        // Assert : Verify the configuration is invalid
+        $this->assertFalse($isValid);
     }
 
     public function test_validate_configuration_without_from(): void
     {
+        // Arrange : Create a configuration without from address
         $config = new MailConfigRecord(
             enabled: true,
             default_from: null
         );
         $driver = new MailDriver($config);
 
-        $this->assertFalse($driver->validateConfiguration());
+        // Act : Validate the configuration
+        $isValid = $driver->validateConfiguration();
+
+        // Assert : Verify the configuration is invalid
+        $this->assertFalse($isValid);
     }
 
     public function test_execute_returns_send_result_record_on_success(): void
     {
+        // Arrange : Clear log and create a message
         $this->clearLog();
 
         $message = new NotificationMessageVO(
@@ -163,8 +195,10 @@ final class MailDriverTest extends TestCase
             type: 'greeting'
         );
 
+        // Act : Send the notification
         $result = $this->driver->send($message, $this->route);
 
+        // Assert : Verify the result structure and log content
         $this->assertTrue($result->success);
         $this->assertEquals(MailChannel::class, $result->channel->getValue());
         $this->assertEquals('john@example.com', $result->destination);
@@ -177,9 +211,7 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_with_empty_configuration_throws_exception(): void
     {
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Driver AndyDefer\LaravelNotification\Drivers\MailDriver configuration is invalid.');
-
+        // Arrange : Create a driver with invalid configuration
         $config = new MailConfigRecord(
             enabled: true,
             default_from: null
@@ -192,11 +224,17 @@ final class MailDriverTest extends TestCase
             type: 'test'
         );
 
+        // Expect : Exception should be thrown
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Driver AndyDefer\LaravelNotification\Drivers\MailDriver configuration is invalid.');
+
+        // Act : Attempt to send the notification
         $driver->send($message, $this->route);
     }
 
     public function test_execute_with_metadata(): void
     {
+        // Arrange : Create a route with metadata
         $this->clearLog();
 
         $route = new NotificationRouteVO(
@@ -214,8 +252,10 @@ final class MailDriverTest extends TestCase
             type: 'metadata_test'
         );
 
+        // Act : Send the notification
         $result = $this->driver->send($message, $route);
 
+        // Assert : Verify the result and log content
         $this->assertTrue($result->success);
 
         $logContent = $this->getLogContent();
@@ -226,6 +266,7 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_without_metadata_uses_config_from(): void
     {
+        // Arrange : Clear log and create a message without metadata
         $this->clearLog();
 
         $message = new NotificationMessageVO(
@@ -234,8 +275,10 @@ final class MailDriverTest extends TestCase
             type: 'simple'
         );
 
+        // Act : Send the notification
         $this->driver->send($message, $this->route);
 
+        // Assert : Verify log content contains the default from address
         $logContent = $this->getLogContent();
         $this->assertStringContainsString('Test without metadata', $logContent);
         $this->assertStringContainsString('No Metadata', $logContent);
@@ -244,6 +287,7 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_sends_html_email(): void
     {
+        // Arrange : Clear log and create an HTML message
         $this->clearLog();
 
         $message = new NotificationMessageVO(
@@ -252,8 +296,10 @@ final class MailDriverTest extends TestCase
             type: 'html_test'
         );
 
+        // Act : Send the notification
         $this->driver->send($message, $this->route);
 
+        // Assert : Verify HTML content in log
         $logContent = $this->getLogContent();
         $this->assertStringContainsString('<h1>Welcome</h1>', $logContent);
         $this->assertStringContainsString('<p>This is a test email</p>', $logContent);
@@ -262,6 +308,7 @@ final class MailDriverTest extends TestCase
 
     public function test_execute_saves_error_in_send_result_on_exception(): void
     {
+        // Arrange : Clear log and mock Mail to throw exception
         $this->clearLog();
 
         Mail::shouldReceive('send')
@@ -273,8 +320,10 @@ final class MailDriverTest extends TestCase
             type: 'test'
         );
 
+        // Act : Send the notification
         $result = $this->driver->send($message, $this->route);
 
+        // Assert : Verify error handling
         $this->assertFalse($result->success);
         $this->assertEquals(MailChannel::class, $result->channel->getValue());
         $this->assertEquals('john@example.com', $result->destination);

@@ -28,6 +28,7 @@ use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\Repository\Records\FindByRecord;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
+use RuntimeException;
 
 final class NotificationSenderProcessorTest extends TestCase
 {
@@ -47,15 +48,18 @@ final class NotificationSenderProcessorTest extends TestCase
 
         $this->runDatabaseMigrations();
 
+        // Arrange : Set up the processor and repository
         $this->processor = app(NotificationSenderProcessor::class);
         $this->repository = app(NotificationRepository::class);
 
+        // Arrange : Create a test user
         $this->user = TestUser::create([
             'name' => 'John Doe',
             'email' => 'john@example.com',
             'phone' => '+33123456789',
         ]);
 
+        // Arrange : Create a test message
         $this->message = new NotificationMessageVO(
             body: new MessageBodyVO('Test message'),
             subject: new MessageSubjectVO('Test Subject'),
@@ -96,14 +100,13 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_with_all_available_channels(): void
     {
-
+        // Arrange : Create a process record with no specific channels (all available)
         $processRecord = new ProcessNotificationRecord;
 
+        // Act : Send the notification
         $results = $this->processor->send($this->user, $this->message, $processRecord);
 
-        foreach ($results as $result) {
-        }
-
+        // Assert : Verify the results
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(4, $results);
 
@@ -113,7 +116,6 @@ final class NotificationSenderProcessorTest extends TestCase
         }
 
         $notifications = $this->getNotificationsForNotifiable($this->user);
-
         $this->assertCount(4, $notifications);
 
         foreach ($notifications as $notification) {
@@ -124,7 +126,7 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_with_specific_channels(): void
     {
-
+        // Arrange : Create a process record with only Mail channel
         $channels = new FqcnChannelCollection;
         $channels->add(new FqcnChannelVO(MailChannel::class));
 
@@ -132,8 +134,10 @@ final class NotificationSenderProcessorTest extends TestCase
             channels: $channels
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($this->user, $this->message, $processRecord);
 
+        // Assert : Verify only mail channel was used
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(1, $results);
 
@@ -143,14 +147,13 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertEquals('john@example.com', $result->destination);
 
         $notifications = $this->getNotificationsForNotifiable($this->user);
-
         $this->assertCount(1, $notifications);
         $this->assertEquals(MailChannel::class, $notifications->first()->channel);
     }
 
     public function test_send_with_limit_per_channel_on_doctor_with_multiple_emails(): void
     {
-
+        // Arrange : Create a doctor with multiple email addresses
         $doctor = TestDoctor::create([
             'name' => 'Dr. Smith',
             'primary_email' => 'smith@clinic.com',
@@ -165,13 +168,16 @@ final class NotificationSenderProcessorTest extends TestCase
         $channelsFilter = new FqcnChannelCollection;
         $channelsFilter->add(new FqcnChannelVO(MailChannel::class));
 
+        // Arrange : Limit to 1 per channel
         $processRecord = new ProcessNotificationRecord(
             channels: $channelsFilter,
             limit_per_channel: 1
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($doctor, $this->message, $processRecord);
 
+        // Assert : Only 1 result (limited to 1 per channel)
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(1, $results);
 
@@ -180,14 +186,13 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertEquals(MailChannel::class, $result->channel->getValue());
 
         $notifications = $this->getNotificationsForNotifiable($doctor);
-
         $this->assertCount(1, $notifications);
         $this->assertEquals(MailChannel::class, $notifications->first()->channel);
     }
 
     public function test_send_with_limit_per_channel_multiple_emails(): void
     {
-
+        // Arrange : Create a doctor with multiple email addresses
         $doctor = TestDoctor::create([
             'name' => 'Dr. Johnson',
             'primary_email' => 'johnson@clinic.com',
@@ -199,13 +204,16 @@ final class NotificationSenderProcessorTest extends TestCase
         $channelsFilter = new FqcnChannelCollection;
         $channelsFilter->add(new FqcnChannelVO(MailChannel::class));
 
+        // Arrange : Limit to 2 per channel
         $processRecord = new ProcessNotificationRecord(
             channels: $channelsFilter,
             limit_per_channel: 2
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($doctor, $this->message, $processRecord);
 
+        // Assert : Both email destinations should be used
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(2, $results);
 
@@ -220,18 +228,16 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertContains('dr.johnson@personal.com', $destinations);
 
         $notifications = $this->getNotificationsForNotifiable($doctor);
-
         $this->assertCount(2, $notifications);
 
         $destinationsDb = $notifications->pluck('destination')->toArray();
-
         $this->assertContains('johnson@clinic.com', $destinationsDb);
         $this->assertContains('dr.johnson@personal.com', $destinationsDb);
     }
 
     public function test_send_with_limit_per_channel_and_all_channels(): void
     {
-
+        // Arrange : Create a doctor
         $doctor = TestDoctor::create([
             'name' => 'Dr. Williams',
             'primary_email' => 'williams@clinic.com',
@@ -240,12 +246,15 @@ final class NotificationSenderProcessorTest extends TestCase
             'specialty' => 'Pediatrics',
         ]);
 
+        // Arrange : Limit to 1 per channel for all channels
         $processRecord = new ProcessNotificationRecord(
             limit_per_channel: 1
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($doctor, $this->message, $processRecord);
 
+        // Assert : One result per channel (Mail has 2 routes, but limited to 1)
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(3, $results);
 
@@ -260,28 +269,29 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertContains(SmsChannel::class, $channelsFound);
 
         $notifications = $this->getNotificationsForNotifiable($doctor);
-
         $this->assertCount(3, $notifications);
     }
 
     public function test_send_throws_exception_when_no_channels_available(): void
     {
-
+        // Arrange : Create a user with no channels
         $user = TestEmptyChannel::create([
             'name' => 'No Channels User',
         ]);
 
         $processRecord = new ProcessNotificationRecord;
 
-        $this->expectException(\RuntimeException::class);
+        // Expect : Exception should be thrown
+        $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('No available channels for notifiable');
 
+        // Act : Attempt to send the notification
         $this->processor->send($user, $this->message, $processRecord);
     }
 
     public function test_send_throws_exception_when_no_channels_match(): void
     {
-
+        // Arrange : Create a user without email
         $channels = new FqcnChannelCollection;
         $channels->add(new FqcnChannelVO(MailChannel::class));
 
@@ -294,22 +304,23 @@ final class NotificationSenderProcessorTest extends TestCase
             channels: $channels
         );
 
-        $this->expectException(\RuntimeException::class);
+        // Expect : Exception should be thrown
+        $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('No available channels for notifiable');
 
+        // Act : Attempt to send the notification
         $this->processor->send($user, $this->message, $processRecord);
     }
 
     public function test_send_creates_notification_with_metadata(): void
     {
-
+        // Arrange : Create a doctor with specialty
         $doctor = TestDoctor::create([
             'name' => 'Dr. Metadata',
             'primary_email' => 'meta@clinic.com',
             'specialty' => 'Radiology',
         ]);
 
-        // ✅ Filtrer sur DatabaseChannel pour récupérer le specialty
         $channels = new FqcnChannelCollection;
         $channels->add(new FqcnChannelVO(DatabaseChannel::class));
 
@@ -317,13 +328,14 @@ final class NotificationSenderProcessorTest extends TestCase
             channels: $channels
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($doctor, $this->message, $processRecord);
 
+        // Assert : Verify metadata was stored
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(1, $results);
 
         $notifications = $this->getNotificationsForNotifiable($doctor);
-
         $this->assertCount(1, $notifications);
 
         $notification = $notifications->first();
@@ -335,7 +347,7 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_stores_correct_destinations(): void
     {
-
+        // Arrange : Create a doctor with multiple destinations
         $doctor = TestDoctor::create([
             'name' => 'Dr. Destinations',
             'primary_email' => 'dest1@clinic.com',
@@ -346,8 +358,10 @@ final class NotificationSenderProcessorTest extends TestCase
 
         $processRecord = new ProcessNotificationRecord;
 
+        // Act : Send the notification
         $this->processor->send($doctor, $this->message, $processRecord);
 
+        // Assert : All destinations are stored
         $notifications = $this->getNotificationsForNotifiable($doctor);
         $destinations = $notifications->pluck('destination')->toArray();
 
@@ -359,10 +373,11 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_generates_unique_session_ids(): void
     {
-
+        // Arrange : Send first message
         $processRecord1 = new ProcessNotificationRecord;
         $this->processor->send($this->user, $this->message, $processRecord1);
 
+        // Arrange : Send second message
         $message2 = new NotificationMessageVO(
             body: new MessageBodyVO('Second message'),
             subject: new MessageSubjectVO('Second Subject'),
@@ -371,12 +386,14 @@ final class NotificationSenderProcessorTest extends TestCase
         $processRecord2 = new ProcessNotificationRecord;
         $this->processor->send($this->user, $message2, $processRecord2);
 
+        // Act : Get session IDs
         $notifications1 = $this->getNotificationsByMessageBody($this->user, 'Test message');
         $notifications2 = $this->getNotificationsByMessageBody($this->user, 'Second message');
 
         $sessionIds1 = $notifications1->pluck('session_id')->unique()->toArray();
         $sessionIds2 = $notifications2->pluck('session_id')->unique()->toArray();
 
+        // Assert : Session IDs are unique
         $this->assertCount(1, $sessionIds1);
         $this->assertCount(1, $sessionIds2);
         $this->assertNotEquals($sessionIds1[0], $sessionIds2[0]);
@@ -384,15 +401,17 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_with_database_channel_only(): void
     {
-
+        // Arrange : Create a user
         $user = TestUser::create([
             'name' => 'Database Only',
         ]);
 
         $processRecord = new ProcessNotificationRecord;
 
+        // Act : Send the notification
         $results = $this->processor->send($user, $this->message, $processRecord);
 
+        // Assert : Only database channel was used
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(1, $results);
 
@@ -401,7 +420,6 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertEquals(DatabaseChannel::class, $result->channel->getValue());
 
         $notifications = $this->getNotificationsForNotifiable($user);
-
         $this->assertCount(1, $notifications);
         $this->assertEquals(DatabaseChannel::class, $notifications->first()->channel);
         $this->assertEquals('database', $notifications->first()->destination);
@@ -409,7 +427,7 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_with_filter_by_channels_multiple(): void
     {
-
+        // Arrange : Filter to Mail and Database channels
         $channels = new FqcnChannelCollection;
         $channels->add(new FqcnChannelVO(MailChannel::class));
         $channels->add(new FqcnChannelVO(DatabaseChannel::class));
@@ -418,8 +436,10 @@ final class NotificationSenderProcessorTest extends TestCase
             channels: $channels
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($this->user, $this->message, $processRecord);
 
+        // Assert : Only Mail and Database channels were used
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(2, $results);
 
@@ -433,13 +453,12 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertContains(DatabaseChannel::class, $channelsFound);
 
         $notifications = $this->getNotificationsForNotifiable($this->user);
-
         $this->assertCount(2, $notifications);
     }
 
     public function test_send_with_limit_per_channel_zero_means_no_limit(): void
     {
-
+        // Arrange : Create a doctor with multiple email addresses
         $doctor = TestDoctor::create([
             'name' => 'Dr. Zero Limit',
             'primary_email' => 'zero1@clinic.com',
@@ -451,28 +470,32 @@ final class NotificationSenderProcessorTest extends TestCase
         $channelsFilter = new FqcnChannelCollection;
         $channelsFilter->add(new FqcnChannelVO(MailChannel::class));
 
+        // Arrange : Limit per channel = 0 (means no limit)
         $processRecord = new ProcessNotificationRecord(
             channels: $channelsFilter,
             limit_per_channel: 0
         );
 
+        // Act : Send the notification
         $results = $this->processor->send($doctor, $this->message, $processRecord);
 
+        // Assert : Both email destinations are used (no limit)
         $this->assertInstanceOf(SendResultCollection::class, $results);
         $this->assertCount(2, $results);
 
         $notifications = $this->getNotificationsForNotifiable($doctor);
-
         $this->assertCount(2, $notifications);
     }
 
     public function test_send_handles_failed_driver(): void
     {
-
+        // Arrange : Create a process record
         $processRecord = new ProcessNotificationRecord;
 
+        // Act : Send the notification
         $results = $this->processor->send($this->user, $this->message, $processRecord);
 
+        // Assert : All results are successful (drivers are mocked)
         $this->assertInstanceOf(SendResultCollection::class, $results);
 
         foreach ($results as $result) {

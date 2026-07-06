@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Repositories;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
+use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\Models\Notification;
 use AndyDefer\LaravelNotification\Records\NotificationFilterRecord;
@@ -13,8 +14,20 @@ use AndyDefer\Repository\AbstractRepository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
-final class NotificationRepository extends AbstractRepository
+/**
+ * Repository for notification management.
+ *
+ * Handles storage, retrieval, and status updates for notifications.
+ *
+ * @extends AbstractRepository<Notification, NotificationRecord>
+ *
+ * @implements NotificationRepositoryInterface<Notification, NotificationRecord>
+ */
+final class NotificationRepository extends AbstractRepository implements NotificationRepositoryInterface
 {
+    /**
+     * Constructor for the notification repository.
+     */
     public function __construct()
     {
         parent::__construct(
@@ -23,6 +36,9 @@ final class NotificationRepository extends AbstractRepository
         );
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function markAsRead(string $id): bool
     {
         $model = $this->find($id);
@@ -33,6 +49,9 @@ final class NotificationRepository extends AbstractRepository
         return $model->update(['read_at' => now()]);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function markAsDelivered(string $id): bool
     {
         $model = $this->find($id);
@@ -43,6 +62,9 @@ final class NotificationRepository extends AbstractRepository
         return $model->update(['status' => NotificationStatus::DELIVERED->value]);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function markAsSent(string $id): bool
     {
         $model = $this->find($id);
@@ -56,6 +78,9 @@ final class NotificationRepository extends AbstractRepository
         ]);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function markAsFailed(string $id, string $error): bool
     {
         $model = $this->find($id);
@@ -69,6 +94,9 @@ final class NotificationRepository extends AbstractRepository
         ]);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function markAsReadBySession(string $sessionId): int
     {
         return $this->modelClass::where('session_id', $sessionId)
@@ -76,6 +104,9 @@ final class NotificationRepository extends AbstractRepository
             ->update(['read_at' => now()]);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function countByNotifiable(Model $notifiable): int
     {
         $filter = NotificationFilterRecord::from([
@@ -86,6 +117,9 @@ final class NotificationRepository extends AbstractRepository
         return $this->count($filter);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function countByStatus(Model $notifiable, NotificationStatus $status): int
     {
         $filter = NotificationFilterRecord::from([
@@ -97,6 +131,9 @@ final class NotificationRepository extends AbstractRepository
         return $this->count($filter);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function countBySession(string $sessionId): int
     {
         $filter = NotificationFilterRecord::from([
@@ -106,11 +143,17 @@ final class NotificationRepository extends AbstractRepository
         return $this->count($filter);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function findBySession(string $sessionId): Builder
     {
         return $this->modelClass::where('session_id', $sessionId);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     protected function applyFilters(Builder $query, AbstractRecord $filters): void
     {
         if (! $filters instanceof NotificationFilterRecord) {
@@ -125,7 +168,7 @@ final class NotificationRepository extends AbstractRepository
             $query->where('channel', $filters->channel->getValue());
         }
 
-        if ($filters->destination !== null) { // ✅ NOUVEAU
+        if ($filters->destination !== null) {
             $query->where('destination', $filters->destination);
         }
 

@@ -28,7 +28,7 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
      *
      * @param  StrictDataObject  $payload  The task payload
      *
-     * @throws InvalidArgumentException If the payload is invalid
+     * @throws \InvalidArgumentException If the payload is invalid
      */
     protected function before(StrictDataObject $payload): void
     {

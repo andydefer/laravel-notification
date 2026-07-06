@@ -8,9 +8,10 @@ use AndyDefer\DomainStructures\Services\HydrationService;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
+use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcessorInterface;
+use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
-use AndyDefer\LaravelNotification\Processors\NotificationSenderProcessor;
 use AndyDefer\LaravelNotification\Records\NotificationTaskPayloadRecord;
 use AndyDefer\LaravelNotification\Records\ProcessNotificationRecord;
 use AndyDefer\LaravelNotification\Records\SendAtRecord;
@@ -18,7 +19,6 @@ use AndyDefer\LaravelNotification\Records\SendLaterRecord;
 use AndyDefer\LaravelNotification\Records\SendNowRecord;
 use AndyDefer\LaravelNotification\Records\SendRecurringRecord;
 use AndyDefer\LaravelNotification\Records\SessionStatsRecord;
-use AndyDefer\LaravelNotification\Repositories\NotificationRepository;
 use AndyDefer\LaravelNotification\Tasks\SendDelayedNotificationTask;
 use AndyDefer\LaravelNotification\Tasks\SendRecurringNotificationTask;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
@@ -37,6 +37,7 @@ use AndyDefer\Task\ValueObjects\TaskAliasVO;
 use AndyDefer\Task\ValueObjects\UniqueTaskFqcnVO;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use InvalidArgumentException;
 
 /**
  * Service for managing notification tasks.
@@ -49,16 +50,16 @@ final class NotificationService implements NotificationServiceInterface
     /**
      * Constructor for the notification service.
      *
-     * @param  NotificationRepository  $notificationRepository  The notification repository
-     * @param  NotificationSenderProcessor  $senderProcessor  The notification sender processor
+     * @param  NotificationRepositoryInterface  $notificationRepository  The notification repository
+     * @param  NotificationSenderProcessorInterface  $senderProcessor  The notification sender processor
      * @param  UniqueTaskServiceInterface  $uniqueTaskService  The unique task service
      * @param  RecurringTaskServiceInterface  $recurringTaskService  The recurring task service
      * @param  LoggerInterface  $logger  The logger instance
      * @param  HydrationService  $hydration  The hydration service
      */
     public function __construct(
-        private readonly NotificationRepository $notificationRepository,
-        private readonly NotificationSenderProcessor $senderProcessor,
+        private readonly NotificationRepositoryInterface $notificationRepository,
+        private readonly NotificationSenderProcessorInterface $senderProcessor,
         private readonly UniqueTaskServiceInterface $uniqueTaskService,
         private readonly RecurringTaskServiceInterface $recurringTaskService,
         private readonly LoggerInterface $logger,
@@ -97,7 +98,7 @@ final class NotificationService implements NotificationServiceInterface
         SendLaterRecord $record
     ): TaskAliasVO {
         if ($record->delay_seconds <= 0) {
-            throw new \InvalidArgumentException('Delay seconds must be greater than 0.');
+            throw new InvalidArgumentException('Delay seconds must be greater than 0.');
         }
 
         $scheduledAt = new NotificationDateTimeVO(
@@ -117,9 +118,8 @@ final class NotificationService implements NotificationServiceInterface
     ): TaskAliasVO {
         $now = new NotificationDateTimeVO(Carbon::now()->toIso8601String());
 
-        // Utilisation de isBeforeOrEqual() pour détecter les dates passées ou égales
         if ($record->scheduled_at->isBeforeOrEqual($now)) {
-            throw new \InvalidArgumentException('Scheduled date must be in the future.');
+            throw new InvalidArgumentException('Scheduled date must be in the future.');
         }
 
         return $this->scheduleUniqueTask($notifiable, $message, $record->scheduled_at, $record);
@@ -134,7 +134,7 @@ final class NotificationService implements NotificationServiceInterface
         SendRecurringRecord $record
     ): TaskAliasVO {
         if ($record->interval_seconds < 1) {
-            throw new \InvalidArgumentException('Interval seconds must be at least 1 second.');
+            throw new InvalidArgumentException('Interval seconds must be at least 1 second.');
         }
 
         $payload = $this->createTaskPayload($notifiable, $message, $record);
@@ -171,7 +171,6 @@ final class NotificationService implements NotificationServiceInterface
         try {
             $alias = new TaskAliasVO($signature);
 
-            // Vérifier si la tâche existe dans les tâches récurrentes
             if ($this->recurringTaskService->exists($alias)) {
                 $this->recurringTaskService->cancel($alias);
                 $this->logInfo('Recurring notification cancelled', ['signature' => $signature]);
@@ -179,7 +178,6 @@ final class NotificationService implements NotificationServiceInterface
                 return true;
             }
 
-            // Vérifier si la tâche existe dans les tâches uniques
             if ($this->uniqueTaskService->exists($alias)) {
                 $this->uniqueTaskService->cancel($alias);
                 $this->logInfo('Unique notification cancelled', ['signature' => $signature]);
@@ -206,7 +204,6 @@ final class NotificationService implements NotificationServiceInterface
         try {
             $alias = new TaskAliasVO($signature);
 
-            // Vérifier si la tâche existe
             if (! $this->recurringTaskService->exists($alias)) {
                 return false;
             }
@@ -233,7 +230,6 @@ final class NotificationService implements NotificationServiceInterface
         try {
             $alias = new TaskAliasVO($signature);
 
-            // Vérifier si la tâche existe
             if (! $this->recurringTaskService->exists($alias)) {
                 return false;
             }
@@ -258,13 +254,12 @@ final class NotificationService implements NotificationServiceInterface
     public function changeInterval(string $signature, int $newIntervalSeconds): bool
     {
         if ($newIntervalSeconds < 1) {
-            throw new \InvalidArgumentException('Interval seconds must be at least 1 second.');
+            throw new InvalidArgumentException('Interval seconds must be at least 1 second.');
         }
 
         try {
             $alias = new TaskAliasVO($signature);
 
-            // Vérifier si la tâche existe
             if (! $this->recurringTaskService->exists($alias)) {
                 return false;
             }

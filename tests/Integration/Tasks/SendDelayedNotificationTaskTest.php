@@ -45,11 +45,13 @@ final class SendDelayedNotificationTaskTest extends TestCase
     {
         parent::setUp();
 
+        // Arrange : Create a test user
         $this->user = TestUser::create([
             'name' => 'John Doe',
             'email' => 'john@example.com',
         ]);
 
+        // Arrange : Get services from container
         $this->notificationService = $this->app->make(NotificationServiceInterface::class);
 
         $debugRepository = new TaskExecutionDebugRepository;
@@ -99,6 +101,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_register_and_execute_task(): void
     {
+        // Arrange : Freeze time and create task data
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -114,15 +117,17 @@ final class SendDelayedNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
             $config
         );
 
-        $this->assertInstanceOf(TaskAliasVO::class, $alias);
-
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Verify task was executed successfully
+        $this->assertInstanceOf(TaskAliasVO::class, $alias);
         $this->assertTrue($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
@@ -137,6 +142,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_not_executed_when_scheduled_in_future(): void
     {
+        // Arrange : Freeze time and create task scheduled in future
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -151,17 +157,22 @@ final class SendDelayedNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->addHours(2)->toIso8601String())
         );
 
+        // Act : Register the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
             $config
         );
 
+        // Assert : Task should be PENDING
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(UniqueTaskStatus::PENDING, $taskModel->getStatus());
 
+        // Act : Try to run the task
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Task should not execute
         $this->assertFalse($result->success);
 
         $updatedTask = $this->uniqueTaskRepository->findByAlias($alias);
@@ -170,6 +181,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_fails_when_notifiable_not_found(): void
     {
+        // Arrange : Freeze time and create task with non-existent notifiable
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -189,6 +201,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
             1
         );
 
+        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -196,6 +209,8 @@ final class SendDelayedNotificationTaskTest extends TestCase
         );
 
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Task should fail
         $this->assertFalse($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
@@ -205,6 +220,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_register_and_execute_with_channels(): void
     {
+        // Arrange : Freeze time and create task with channels
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -219,6 +235,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -226,6 +243,8 @@ final class SendDelayedNotificationTaskTest extends TestCase
         );
 
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Task should succeed and create notification
         $this->assertTrue($result->success);
 
         $this->assertDatabaseHas('notifications', [
@@ -236,6 +255,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_register_and_execute_with_channel_collection(): void
     {
+        // Arrange : Freeze time and create task with channel collection
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -256,6 +276,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
+        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -263,6 +284,8 @@ final class SendDelayedNotificationTaskTest extends TestCase
         );
 
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Task should succeed and create notification
         $this->assertTrue($result->success);
 
         $this->assertDatabaseHas('notifications', [
@@ -273,6 +296,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_fails_when_class_not_found(): void
     {
+        // Arrange : Freeze time and create task with non-existent class
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -292,6 +316,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
             1
         );
 
+        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -299,6 +324,8 @@ final class SendDelayedNotificationTaskTest extends TestCase
         );
 
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Task should fail
         $this->assertFalse($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
@@ -308,6 +335,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_validates_payload_before_execution(): void
     {
+        // Arrange : Freeze time and create task without body (invalid)
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -327,6 +355,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
             1
         );
 
+        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -334,6 +363,8 @@ final class SendDelayedNotificationTaskTest extends TestCase
         );
 
         $result = $this->uniqueTaskService->run($alias);
+
+        // Assert : Task should fail validation
         $this->assertFalse($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
