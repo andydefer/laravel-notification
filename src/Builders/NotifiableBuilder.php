@@ -8,12 +8,12 @@ use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
+use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Options\SendOptions;
 use AndyDefer\LaravelNotification\Records\SendAtRecord;
 use AndyDefer\LaravelNotification\Records\SendLaterRecord;
 use AndyDefer\LaravelNotification\Records\SendNowRecord;
 use AndyDefer\LaravelNotification\Records\SendRecurringRecord;
-use AndyDefer\LaravelNotification\Services\NotificationService;
 use AndyDefer\LaravelNotification\ValueObjects\DirectNotifiable;
 use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
@@ -41,18 +41,16 @@ final class NotifiableBuilder
 
     private int|string $key = 0;
 
-    private NotificationService $service;
-
-    public function __construct(?NotificationService $service = null)
+    public function __construct(
+        protected NotificationServiceInterface $service)
     {
-        $this->service = $service ?? app(NotificationService::class);
         $this->routes = new NotificationRouteCollection;
         $this->data = new StrictDataObject([]);
     }
 
-    public static function create(?NotificationService $service = null): self
+    public static function create(): self
     {
-        return new self($service);
+        return new self(app(NotificationServiceInterface::class));
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification;
 
 use AndyDefer\DomainStructures\Services\HydrationService;
+use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
 use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcessorInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
@@ -56,6 +57,22 @@ final class NotificationServiceProvider extends ServiceProvider
         $this->app->alias(
             abstract: NotificationServiceInterface::class,
             alias: NotificationService::class
+        );
+
+        // ✅ NotifiableBuilder - Register as singleton
+        $this->app->singleton(
+            abstract: NotifiableBuilder::class,
+            concrete: function ($app) {
+                return NotifiableBuilder::create(
+                    $app->make(NotificationServiceInterface::class)
+                );
+            }
+        );
+
+        // ✅ Alias for NotifiableBuilder (convenience)
+        $this->app->alias(
+            abstract: NotifiableBuilder::class,
+            alias: 'notifiable.builder'
         );
     }
 
