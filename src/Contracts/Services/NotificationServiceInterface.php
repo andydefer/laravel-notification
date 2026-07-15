@@ -6,6 +6,7 @@ namespace AndyDefer\LaravelNotification\Contracts\Services;
 
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
+use AndyDefer\LaravelNotification\Options\SendOptions;
 use AndyDefer\LaravelNotification\Records\SendAtRecord;
 use AndyDefer\LaravelNotification\Records\SendLaterRecord;
 use AndyDefer\LaravelNotification\Records\SendNowRecord;
@@ -16,12 +17,6 @@ use AndyDefer\LaravelNotification\ValueObjects\NotificationStatsVO;
 use AndyDefer\Task\ValueObjects\TaskAliasVO;
 use Illuminate\Database\Eloquent\Model;
 
-/**
- * Interface for the notification service.
- *
- * Defines the contract for sending notifications immediately,
- * with delay, at specific times, or on a recurring schedule.
- */
 interface NotificationServiceInterface
 {
     /**
@@ -29,13 +24,13 @@ interface NotificationServiceInterface
      *
      * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
      * @param  NotificationMessageVO  $message  The notification message
-     * @param  SendNowRecord  $record  The send configuration
+     * @param  SendNowRecord|null  $record  The send configuration
      * @return SendResultCollection The collection of send results
      */
     public function sendNow(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendNowRecord $record
+        ?SendNowRecord $record = null
     ): SendResultCollection;
 
     /**
@@ -43,13 +38,13 @@ interface NotificationServiceInterface
      *
      * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
      * @param  NotificationMessageVO  $message  The notification message
-     * @param  SendLaterRecord  $record  The send configuration
+     * @param  SendLaterRecord|null  $record  The send configuration
      * @return TaskAliasVO The task alias
      */
     public function sendLater(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendLaterRecord $record
+        ?SendLaterRecord $record = null
     ): TaskAliasVO;
 
     /**
@@ -57,13 +52,13 @@ interface NotificationServiceInterface
      *
      * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
      * @param  NotificationMessageVO  $message  The notification message
-     * @param  SendAtRecord  $record  The send configuration
+     * @param  SendAtRecord|null  $record  The send configuration
      * @return TaskAliasVO The task alias
      */
     public function sendAt(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendAtRecord $record
+        ?SendAtRecord $record = null
     ): TaskAliasVO;
 
     /**
@@ -71,13 +66,13 @@ interface NotificationServiceInterface
      *
      * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
      * @param  NotificationMessageVO  $message  The notification message
-     * @param  SendRecurringRecord  $record  The send configuration
+     * @param  SendRecurringRecord|null  $record  The send configuration
      * @return TaskAliasVO The task alias
      */
     public function sendRecurring(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendRecurringRecord $record
+        ?SendRecurringRecord $record = null
     ): TaskAliasVO;
 
     /**
@@ -128,4 +123,19 @@ interface NotificationServiceInterface
      * @return SessionStatsRecord The session statistics
      */
     public function getSessionStats(string $sessionId): SessionStatsRecord;
+
+    /**
+     * Set options for the next send operation.
+     *
+     * @param  SendOptions  $options  The send options
+     * @return $this
+     */
+    public function withOptions(SendOptions $options): self;
+
+    /**
+     * Reset the pending options.
+     *
+     * @return $this
+     */
+    public function resetOptions(): self;
 }

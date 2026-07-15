@@ -19,13 +19,15 @@
    - [Envoi différé](#envoi-différé)
    - [Envoi planifié](#envoi-planifié)
    - [Envoi récurrent](#envoi-récurrent)
-6. [Gestion des tâches](#gestion-des-tâches)
-7. [Statistiques et rapports](#statistiques-et-rapports)
-8. [Canaux disponibles](#canaux-disponibles)
-9. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
-10. [Cas d'usage concrets](#cas-dusage-concrets)
-11. [Bonnes pratiques](#bonnes-pratiques)
-12. [Référence de l'API](#référence-de-lapi)
+6. [Filtrage des destinations avec SendOptions](#filtrage-des-destinations-avec-sendoptions)
+7. [NotifiableBuilder - Envoi sans entité](#notifiablebuilder---envoi-sans-entité)
+8. [Gestion des tâches](#gestion-des-tâches)
+9. [Statistiques et rapports](#statistiques-et-rapports)
+10. [Canaux disponibles](#canaux-disponibles)
+11. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
+12. [Cas d'usage concrets](#cas-dusage-concrets)
+13. [Bonnes pratiques](#bonnes-pratiques)
+14. [Référence de l'API](#référence-de-lapi)
 
 ---
 
@@ -59,14 +61,52 @@ php artisan vendor:publish --tag=notification-config
 | Statut de l'envoi (SENT/FAILED) | ❌ | ✅ |
 | Limitation par canal | ❌ | ✅ |
 | Métadonnées par destination | ❌ | ✅ |
+| Filtrage des destinations par canal | ❌ | ✅ |
 | Envoi différé | ⚠️ (via queues) | ✅ (intégré) |
 | Envoi récurrent | ⚠️ (via scheduler) | ✅ (intégré) |
 | Gestion des tâches (pause/reprise) | ❌ | ✅ |
 | Architecture extensible | ⚠️ (complexe) | ✅ (simple) |
+| Envoi sans entité Notifiable | ❌ | ✅ (NotifiableBuilder) |
 
 ### En une phrase
 
 > **Laravel Notifications envoie un message sur un canal défini. Laravel Notification orchestre l'envoi sur tous les canaux d'une entité, trace chaque tentative et permet la planification avancée.**
+
+---
+
+## Architecture en un coup d'œil
+
+L'architecture du package repose sur plusieurs composants clés :
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    NotificationService                          │
+│          (Point d'entrée principal de l'API)                    │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+┌─────────────────┐┌─────────────────┐┌─────────────────────────┐
+│ Notifiable      ││ Notifiable      ││    NotificationSender   │
+│ Builder         ││ Service         ││    Processor            │
+│ (API fluente)   ││ (API standard)  ││    (Orchestrateur)      │
+└─────────────────┘└─────────────────┘└─────────────────────────┘
+```
+
+### Composants principaux
+
+| Composant | Rôle |
+|-----------|------|
+| `NotificationService` | Service principal, point d'entrée de l'API |
+| `NotifiableBuilder` | Builder fluide pour envoyer des notifications sans entité |
+| `NotificationSenderProcessor` | Orchestre l'envoi : résolution des routes, filtres, limites |
+| `SendOptions` | Configuration fluide des options d'envoi (canaux, limites, filtres) |
+| `NotificationRouteVO` | Value Object définissant un canal + destination + métadonnées |
+| `AbstractDriver` | Classe de base pour les drivers d'envoi (Mail, SMS, Slack, etc.) |
+| `AbstractChannel` | Classe de base pour les canaux de notification |
+| `SendDelayedNotificationTask` | Tâche unique pour les envois différés/planifiés |
+| `SendRecurringNotificationTask` | Tâche récurrente pour les envois périodiques |
 
 ---
 
@@ -85,6 +125,7 @@ use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
+use AndyDefer\LaravelNotification\Channels\SlackChannel;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use Illuminate\Database\Eloquent\Model;
 
@@ -128,7 +169,16 @@ class User extends Model implements NotifiableInterface
             ));
         }
         
-        // ✅ Base de données (toujours disponible)
+        // ✅ Slack (ex: pour les admins)
+        if ($this->is_admin) {
+            $collection->add(new NotificationRouteVO(
+                channelClass: SlackChannel::class,
+                destination: '#admin-notifications',
+                metadata: new StrictDataObject(['webhook_url' => env('SLACK_ADMIN_WEBHOOK')])
+            ));
+        }
+        
+        // ✅ Base de données (toujours disponible pour la traçabilité)
         $collection->add(new NotificationRouteVO(
             channelClass: DatabaseChannel::class,
             destination: 'database'
@@ -149,6 +199,21 @@ class User extends Model implements NotifiableInterface
 }
 ```
 
+### NotificationRouteVO
+
+Le `NotificationRouteVO` est le Value Object qui définit une route de notification :
+
+```php
+new NotificationRouteVO(
+    channelClass: MailChannel::class,      // Le canal à utiliser
+    destination: 'user@example.com',       // La destination (email, téléphone, etc.)
+    metadata: new StrictDataObject([       // Métadonnées optionnelles
+        'type' => 'primary',
+        'name' => 'John Doe',
+    ])
+);
+```
+
 ---
 
 ## Envoyer une notification
@@ -161,6 +226,8 @@ class User extends Model implements NotifiableInterface
 use AndyDefer\LaravelNotification\Services\NotificationService;
 use AndyDefer\LaravelNotification\Records\SendNowRecord;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
+use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
+use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
 
@@ -173,8 +240,10 @@ class UserController extends Controller
     public function welcome(User $user)
     {
         $message = new NotificationMessageVO(
-            subject: 'Bienvenue !',
-            body: '<h1>Bonjour !</h1><p>Bienvenue sur notre plateforme.</p>'
+            body: new MessageBodyVO('<h1>Bonjour !</h1><p>Bienvenue sur notre plateforme.</p>'),
+            subject: new MessageSubjectVO('Bienvenue !'),
+            type: 'welcome',
+            data: new StrictDataObject(['user_id' => $user->id])
         );
 
         $record = SendNowRecord::from([
@@ -188,6 +257,11 @@ class UserController extends Controller
             'success' => $results->allSuccess(),
             'sent' => $results->getSuccessCount(),
             'failed' => $results->getFailureCount(),
+            'details' => $results->map(fn($r) => [
+                'channel' => $r->channel->getValue(),
+                'destination' => $r->destination,
+                'success' => $r->success,
+            ])->toArray(),
         ]);
     }
 }
@@ -198,6 +272,7 @@ class UserController extends Controller
 - Le SMS est envoyé au numéro primaire
 - Les deux notifications sont persistées en base de données
 - Le statut de chaque envoi est enregistré (SENT ou FAILED)
+- Une session ID est générée pour tracer le lot d'envois
 
 ---
 
@@ -207,6 +282,7 @@ class UserController extends Controller
 <?php
 
 use AndyDefer\LaravelNotification\Records\SendLaterRecord;
+use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 
 class CartController extends Controller
 {
@@ -215,8 +291,13 @@ class CartController extends Controller
         $user = $cart->user;
         
         $message = new NotificationMessageVO(
-            subject: 'Votre panier vous attend !',
-            body: '<p>Vous avez des articles dans votre panier...</p>'
+            body: new MessageBodyVO('Vous avez des articles dans votre panier...'),
+            subject: new MessageSubjectVO('Votre panier vous attend !'),
+            type: 'abandoned_cart',
+            data: new StrictDataObject([
+                'cart_id' => $cart->id,
+                'items_count' => $cart->items->count(),
+            ])
         );
 
         $record = SendLaterRecord::from([
@@ -262,8 +343,13 @@ class AppointmentController extends Controller
         $user = $appointment->user;
         
         $message = new NotificationMessageVO(
-            subject: 'Rappel de rendez-vous',
-            body: '<p>Votre rendez-vous est dans 24h.</p>'
+            body: new MessageBodyVO('Votre rendez-vous est dans 24h.'),
+            subject: new MessageSubjectVO('Rappel de rendez-vous'),
+            type: 'appointment_reminder',
+            data: new StrictDataObject([
+                'appointment_id' => $appointment->id,
+                'start_at' => $appointment->start_at->toIso8601String(),
+            ])
         );
 
         $scheduledAt = $appointment->start_at->subDay();
@@ -295,14 +381,17 @@ class AppointmentController extends Controller
 
 use AndyDefer\LaravelNotification\Records\SendRecurringRecord;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
+use AndyDefer\Task\ValueObjects\MaxFailedAttemptsVO;
 
 class NewsletterController extends Controller
 {
     public function scheduleNewsletter(User $user)
     {
         $message = new NotificationMessageVO(
-            subject: 'Votre newsletter hebdomadaire',
-            body: '<p>Voici les dernières actualités...</p>'
+            body: new MessageBodyVO('Voici les dernières actualités...'),
+            subject: new MessageSubjectVO('Votre newsletter hebdomadaire'),
+            type: 'newsletter',
+            data: new StrictDataObject(['user_id' => $user->id])
         );
 
         $record = SendRecurringRecord::from([
@@ -311,7 +400,7 @@ class NewsletterController extends Controller
             'end_at' => new NotificationDateTimeVO('2026-12-31 09:00:00'),
             'channels' => [MailChannel::class],
             'limit_per_channel' => 1,
-            'max_attempts' => 3,
+            'max_attempts' => new MaxFailedAttemptsVO(3),
         ]);
 
         $alias = $this->service->sendRecurring($user, $message, $record);
@@ -332,6 +421,212 @@ class NewsletterController extends Controller
 
 ---
 
+## Filtrage des destinations avec SendOptions
+
+Le package introduit `SendOptions` pour un contrôle précis des destinations par canal. Cette approche fluide permet de filtrer dynamiquement les destinations sans modifier les records.
+
+### Utilisation de base
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\Options\SendOptions;
+use AndyDefer\LaravelNotification\Channels\MailChannel;
+use AndyDefer\LaravelNotification\Channels\SmsChannel;
+
+$options = SendOptions::init()
+    ->withChannel(MailChannel::class)
+    ->withDestinationFilter(MailChannel::class, 'user@example.com')
+    ->withLimitPerChannel(1);
+
+$results = $notificationService
+    ->withOptions($options)
+    ->sendNow($user, $message);
+```
+
+### Filtres multiples par canal
+
+```php
+<?php
+
+// ✅ Envoyer à plusieurs emails spécifiques
+$options = SendOptions::init()
+    ->withChannel(MailChannel::class)
+    ->withDestinationFilter(MailChannel::class, [
+        'user@example.com',
+        'admin@example.com',
+        'support@example.com',
+    ]);
+
+$results = $notificationService
+    ->withOptions($options)
+    ->sendNow($user, $message);
+```
+
+### Filtres sur plusieurs canaux
+
+```php
+<?php
+
+// ✅ Email uniquement à l'email pro, SMS uniquement au téléphone pro
+$options = SendOptions::init()
+    ->withChannels([MailChannel::class, SmsChannel::class])
+    ->withDestinationFilter(MailChannel::class, 'pro@example.com')
+    ->withDestinationFilter(SmsChannel::class, '+33123456789');
+
+$results = $notificationService
+    ->withOptions($options)
+    ->sendNow($user, $message);
+```
+
+---
+
+## NotifiableBuilder - Envoi sans entité
+
+Le `NotifiableBuilder` est un builder fluide qui permet d'envoyer des notifications **sans avoir à implémenter l'interface `NotifiableInterface`**. C'est idéal pour les cas où vous voulez envoyer directement à une adresse email, un numéro de téléphone, ou toute autre destination, sans passer par une entité.
+
+### Utilisation de base
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
+use AndyDefer\LaravelNotification\Channels\MailChannel;
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Bienvenue')
+    ->body('<h1>Bienvenue sur notre plateforme</h1>')
+    ->sendNow();
+
+if ($results->allSuccess()) {
+    echo "✅ Email envoyé avec succès";
+}
+```
+
+### Envoi multi-canaux
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\Channels\MailChannel;
+use AndyDefer\LaravelNotification\Channels\SmsChannel;
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->to(SmsChannel::class, '+33123456789')
+    ->subject('Notification importante')
+    ->body('Votre commande a été expédiée.')
+    ->data(['order_id' => 12345])
+    ->sendNow();
+```
+
+### Envoi à plusieurs destinations sur le même canal
+
+```php
+<?php
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, [
+        'user1@example.com',
+        'user2@example.com',
+        'user3@example.com',
+    ])
+    ->subject('Newsletter')
+    ->body('Contenu de la newsletter')
+    ->limit(3)  // Limite à 3 destinataires
+    ->sendNow();
+```
+
+### Envoi différé avec le builder
+
+```php
+<?php
+
+$alias = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Rappel')
+    ->body('N\'oubliez pas votre rendez-vous demain.')
+    ->sendLater(1800); // Dans 30 minutes
+```
+
+### Envoi récurrent avec le builder
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
+
+$alias = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Newsletter hebdomadaire')
+    ->body('Voici les dernières actualités...')
+    ->limit(1)
+    ->sendRecurring(
+        604800, // 7 jours
+        new NotificationDateTimeVO(now()->startOfWeek()->toIso8601String()),
+        new NotificationDateTimeVO(now()->addWeeks(4)->toIso8601String())
+    );
+```
+
+### Avec filtres et métadonnées
+
+```php
+<?php
+
+use AndyDefer\DomainStructures\Utils\StrictDataObject;
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, ['user@example.com', 'admin@example.com'])
+    ->subject('Offre spéciale')
+    ->body('Profitez de notre offre exclusive.')
+    ->filter(MailChannel::class, 'user@example.com')
+    ->metadata(MailChannel::class, new StrictDataObject([
+        'priority' => 'high',
+        'name' => 'John Doe',
+    ]))
+    ->limit(1)
+    ->sendNow();
+```
+
+### Avec traçage
+
+```php
+<?php
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Notification tracée')
+    ->body('Cette notification est tracée.')
+    ->as('external_user', 12345)  // Définit la classe morph et la clé
+    ->sendNow();
+```
+
+### API du NotifiableBuilder
+
+| Méthode | Description | Retour |
+|---------|-------------|--------|
+| `static create(?NotificationService $service): self` | Crée une nouvelle instance | `self` |
+| `to(string $channelClass, string|array $destination): self` | Définit la destination pour un canal | `self` |
+| `body(string $body): self` | Définit le corps du message | `self` |
+| `subject(string $subject): self` | Définit le sujet du message | `self` |
+| `type(string $type): self` | Définit le type du message | `self` |
+| `data(array $data): self` | Définit les données supplémentaires | `self` |
+| `limit(int $limit): self` | Définit la limite par canal | `self` |
+| `filter(string $channelClass, string|array $destinations): self` | Ajoute un filtre de destination | `self` |
+| `filters(array $filters): self` | Remplace tous les filtres | `self` |
+| `options(SendOptions $options): self` | Définit les options d'envoi | `self` |
+| `metadata(string $channelClass, StrictDataObject $metadata): self` | Ajoute des métadonnées | `self` |
+| `metadataAll(StrictDataObject $metadata): self` | Ajoute des métadonnées à tous les canaux | `self` |
+| `as(string $morphClass, int|string $key): self` | Définit la classe morph et la clé | `self` |
+| `sendNow(?SendNowRecord $record): SendResultCollection` | Envoi immédiat | `SendResultCollection` |
+| `sendLater(int $delaySeconds): TaskAliasVO` | Envoi différé | `TaskAliasVO` |
+| `sendAt(NotificationDateTimeVO $scheduledAt): TaskAliasVO` | Envoi planifié | `TaskAliasVO` |
+| `sendRecurring(int $intervalSeconds, NotificationDateTimeVO $startAt, ?NotificationDateTimeVO $endAt): TaskAliasVO` | Envoi récurrent | `TaskAliasVO` |
+| `reset(): self` | Réinitialise le builder | `self` |
+
+---
+
 ## Gestion des tâches
 
 Le `NotificationService` expose une API complète pour gérer les tâches de notification.
@@ -344,6 +639,7 @@ Le `NotificationService` expose une API complète pour gérer les tâches de not
 namespace App\Services;
 
 use AndyDefer\LaravelNotification\Services\NotificationService;
+use AndyDefer\Task\ValueObjects\TaskAliasVO;
 
 class TaskManager
 {
@@ -376,6 +672,15 @@ class TaskManager
         return $this->service->cancel($alias);
         // La tâche est définitivement supprimée
     }
+
+    // ✅ Vérifier l'existence d'une tâche
+    public function exists(string $alias): bool
+    {
+        $taskAlias = new TaskAliasVO($alias);
+        
+        return $this->uniqueTaskService->exists($taskAlias)
+            || $this->recurringTaskService->exists($taskAlias);
+    }
 }
 ```
 
@@ -404,6 +709,15 @@ class AdminController extends Controller
         
         return response()->json(['error' => 'Tâche non trouvée'], 404);
     }
+
+    public function cancelCampaign(string $alias)
+    {
+        if ($this->service->cancel($alias)) {
+            return response()->json(['message' => 'Campagne annulée']);
+        }
+        
+        return response()->json(['error' => 'Tâche non trouvée'], 404);
+    }
 }
 ```
 
@@ -415,6 +729,7 @@ class AdminController extends Controller
 <?php
 
 use AndyDefer\LaravelNotification\Services\NotificationService;
+use AndyDefer\LaravelNotification\ValueObjects\NotificationStatsVO;
 
 class StatsController extends Controller
 {
@@ -476,6 +791,30 @@ class StatsController extends Controller
 
         return view('admin.dashboard', $globalStats);
     }
+}
+```
+
+### NotificationStatsVO
+
+Le `NotificationStatsVO` propose plusieurs méthodes utiles :
+
+```php
+$stats = $service->getStats($user);
+
+// Taux de succès
+$successRate = $stats->success_rate;           // 75.5
+
+// Pourcentages
+$percentageSent = $stats->getPercentageSent();     // 60.0%
+$percentageFailed = $stats->getPercentageFailed(); // 40.0%
+
+// Vérifications
+if ($stats->isSuccess()) {
+    echo "✅ Toutes les notifications ont réussi";
+}
+
+if ($stats->hasFailures()) {
+    echo "⚠️ Des échecs ont été détectés";
 }
 ```
 
@@ -611,7 +950,9 @@ namespace App\Notifications\Channels;
 
 use AndyDefer\LaravelNotification\Abstracts\AbstractChannel;
 use AndyDefer\LaravelNotification\Abstracts\AbstractDriver;
+use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
 use App\Notifications\Drivers\DiscordDriver;
+use App\Notifications\Records\DiscordConfigRecord;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 
 class DiscordChannel extends AbstractChannel
@@ -651,7 +992,7 @@ class DiscordChannel extends AbstractChannel
         /** @var DiscordConfigRecord $config */
         $config = $this->getConfig();
 
-        return new DiscordDriver($config);
+        return new DiscordDriver($config->toArray());
     }
 
     public static function validateDestination(string $destination): bool
@@ -662,7 +1003,25 @@ class DiscordChannel extends AbstractChannel
 }
 ```
 
-### 3. Utiliser le canal personnalisé
+### 3. Créer le Record de Configuration
+
+```php
+<?php
+
+namespace App\Notifications\Records;
+
+use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
+
+final class DiscordConfigRecord extends AbstractRecord
+{
+    public function __construct(
+        public readonly bool $enabled = false,
+        public readonly ?string $webhook_url = null,
+    ) {}
+}
+```
+
+### 4. Utiliser le canal personnalisé
 
 ```php
 <?php
@@ -676,8 +1035,8 @@ class OrderController extends Controller
         $user = User::find(1); // Admin
         
         $message = new NotificationMessageVO(
-            subject: 'Nouvelle commande !',
-            body: "La commande #{$order->id} a été passée."
+            body: new MessageBodyVO("La commande #{$order->id} a été passée."),
+            subject: new MessageSubjectVO('Nouvelle commande !'),
         );
 
         $record = SendNowRecord::from([
@@ -761,6 +1120,13 @@ $record = SendNowRecord::from([
     'channels' => [MailChannel::class, WhatsAppChannel::class],
     'limit_per_channel' => 1,
 ]);
+
+// ✅ Envoi avec filtrage
+$options = SendOptions::init()
+    ->withChannels([MailChannel::class, SmsChannel::class])
+    ->withDestinationFilter(MailChannel::class, $doctor->email_professional)
+    ->withDestinationFilter(SmsChannel::class, $doctor->phone)
+    ->withLimitPerChannel(1);
 ```
 
 ### 2. E-commerce
@@ -811,66 +1177,81 @@ $service->sendNow($order, $message, $record);
 // → Tout est tracé en base de données
 ```
 
-### 3. Newsletter et campagnes marketing
+### 3. Envoi direct avec NotifiableBuilder (SaaS)
 
 ```php
-// ✅ Newsletter hebdomadaire sur 4 semaines
-$record = SendRecurringRecord::from([
-    'interval_seconds' => 604800, // 7 jours
-    'start_at' => new NotificationDateTimeVO('2026-07-08 09:00:00'),
-    'end_at' => new NotificationDateTimeVO('2026-07-29 09:00:00'),
-    'channels' => [MailChannel::class],
-    'limit_per_channel' => 1,
-]);
+<?php
 
-$alias = $service->sendRecurring($user, $message, $record);
+use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
+use AndyDefer\LaravelNotification\Channels\MailChannel;
 
-// ✅ Gestion de la campagne
-$service->pause($alias);      // Pause si désabonnement
-$service->resume($alias);     // Reprise si réabonnement
-$service->changeInterval($alias, 86400); // Tous les jours
-$service->cancel($alias);     // Annulation définitive
+class InvitationService
+{
+    public function sendInvitation(string $email, string $name): void
+    {
+        $results = NotifiableBuilder::create()
+            ->to(MailChannel::class, $email)
+            ->subject('Vous êtes invité !')
+            ->body("<h1>Bonjour {$name}</h1><p>Rejoignez notre plateforme.</p>")
+            ->metadata(MailChannel::class, new StrictDataObject([
+                'recipient_name' => $name,
+                'type' => 'invitation',
+            ]))
+            ->sendNow();
+
+        if (!$results->allSuccess()) {
+            Log::error('Échec de l\'envoi de l\'invitation', [
+                'email' => $email,
+                'errors' => $results->getFailures()->toArray(),
+            ]);
+        }
+    }
+
+    public function sendBulkInvitations(array $emails, string $message): void
+    {
+        $results = NotifiableBuilder::create()
+            ->to(MailChannel::class, $emails)
+            ->subject('Invitation collective')
+            ->body($message)
+            ->limit(count($emails))
+            ->sendNow();
+
+        echo "✅ " . $results->getSuccessCount() . " invitations envoyées\n";
+        echo "❌ " . $results->getFailureCount() . " échecs\n";
+    }
+}
 ```
 
-### 4. Relance après abandon de panier
-
-```php
-// ✅ Email de relance 30 minutes après abandon
-$record = SendLaterRecord::from([
-    'delay_seconds' => 1800,
-    'channels' => [MailChannel::class, SmsChannel::class],
-    'limit_per_channel' => 1,
-]);
-
-$alias = $service->sendLater($user, $message, $record);
-
-// ✅ Si le panier est validé, annuler la tâche
-$service->cancel($alias);
-```
-
-### 5. Notifications d'urgence avec escalade
+### 4. Notifications d'urgence avec escalade
 
 ```php
 // ✅ Système d'escalade : tenter 3 fois avec délai croissant
 $attempts = [
-    ['delay' => 300, 'channel' => SmsChannel::class],
-    ['delay' => 600, 'channel' => WhatsAppChannel::class],
-    ['delay' => 900, 'channel' => MailChannel::class],
+    ['delay' => 300, 'channel' => SmsChannel::class, 'destination' => $user->phone],
+    ['delay' => 600, 'channel' => WhatsAppChannel::class, 'destination' => $user->phone],
+    ['delay' => 900, 'channel' => MailChannel::class, 'destination' => $user->email_professional],
 ];
 
 foreach ($attempts as $attempt) {
+    $options = SendOptions::init()
+        ->withChannel($attempt['channel'])
+        ->withDestinationFilter($attempt['channel'], $attempt['destination'])
+        ->withLimitPerChannel(1);
+
     $record = SendLaterRecord::from([
         'delay_seconds' => $attempt['delay'],
         'channels' => [$attempt['channel']],
         'limit_per_channel' => 1,
     ]);
     
-    $service->sendLater($user, $message, $record);
+    $service
+        ->withOptions($options)
+        ->sendLater($user, $message, $record);
 }
 // → SMS dans 5 min, WhatsApp dans 10 min, Email dans 15 min
 ```
 
-### 6. Audit et conformité
+### 5. Audit et conformité
 
 ```php
 // ✅ Récupération de toutes les notifications d'un utilisateur
@@ -881,12 +1262,23 @@ if ($stats->failed > 0) {
     Log::warning('Des notifications ont échoué pour l\'utilisateur ' . $user->id);
 }
 
-// ✅ Rapport mensuel
+// ✅ Rapport mensuel avec analyse
 $users = User::where('created_at', '>=', now()->subMonth())->get();
 $report = [];
 foreach ($users as $user) {
-    $report[$user->id] = $service->getStats($user)->toArray();
+    $stats = $service->getStats($user);
+    $report[$user->id] = [
+        'total' => $stats->total,
+        'success_rate' => $stats->success_rate,
+        'sent' => $stats->sent,
+        'failed' => $stats->failed,
+        'pending' => $stats->pending,
+        'has_failures' => $stats->hasFailures(),
+    ];
 }
+
+// ✅ Exporter le rapport
+Storage::put('reports/notification_report_' . now()->format('Y-m') . '.json', json_encode($report));
 ```
 
 ---
@@ -934,6 +1326,22 @@ public function getNotificationChannels(): NotificationRouteCollection
         new NotificationRouteVO(MailChannel::class, $this->email), // Peut être null
     ]);
 }
+```
+
+### ✅ Utiliser NotifiableBuilder pour les envois directs
+
+```php
+// ✅ BON - Envoi direct sans entité
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Test')
+    ->body('Contenu')
+    ->sendNow();
+
+// ❌ ÉVITER - Créer une entité fictive
+class FakeUser extends Model implements NotifiableInterface { ... }
+$fakeUser = new FakeUser();
+$service->sendNow($fakeUser, $message);
 ```
 
 ### ✅ Utiliser les métadonnées pour le contexte
@@ -990,16 +1398,44 @@ public function getNotificationChannels(): NotificationRouteCollection
 
 ```php
 // ✅ Pour éviter les spams, limiter à 1 par canal
-$record = SendNowRecord::from([
-    'channels' => [MailChannel::class, SmsChannel::class],
-    'limit_per_channel' => 1,
-]);
+$options = SendOptions::init()
+    ->withChannels([MailChannel::class, SmsChannel::class])
+    ->withLimitPerChannel(1);
 
 // ✅ Pour les notifications critiques, tout envoyer
-$record = SendNowRecord::from([
-    'channels' => [], // Tous
-    'limit_per_channel' => null, // Pas de limite
-]);
+$options = SendOptions::init()
+    ->withChannels([]) // Tous
+    ->withLimitPerChannel(null); // Pas de limite
+```
+
+### ✅ Utiliser les filtres de destination pour le contrôle précis
+
+```php
+// ✅ Envoyer uniquement à des emails spécifiques
+$options = SendOptions::init()
+    ->withChannel(MailChannel::class)
+    ->withDestinationFilter(MailChannel::class, [
+        $user->email_primary,
+        $user->email_secondary,
+    ]);
+
+// ✅ Filtres multiples par canal
+$options = SendOptions::init()
+    ->withChannels([MailChannel::class, SmsChannel::class])
+    ->withDestinationFilter(MailChannel::class, $user->email_professional)
+    ->withDestinationFilter(SmsChannel::class, $user->phone_professional);
+```
+
+### ✅ Auto-reset des options
+
+Les options sont automatiquement réinitialisées après chaque envoi :
+
+```php
+// ✅ Premier envoi avec options
+$service->withOptions($options)->sendNow($user, $message);
+
+// ✅ Second envoi sans options (utilise les canaux par défaut)
+$service->sendNow($user, $message);
 ```
 
 ---
@@ -1010,16 +1446,53 @@ $record = SendNowRecord::from([
 
 | Méthode | Description | Retour |
 |---------|-------------|--------|
-| `sendNow(NotifiableInterface, NotificationMessageVO, SendNowRecord)` | Envoi immédiat | `SendResultCollection` |
-| `sendLater(NotifiableInterface, NotificationMessageVO, SendLaterRecord)` | Envoi différé | `TaskAliasVO` |
-| `sendAt(NotifiableInterface, NotificationMessageVO, SendAtRecord)` | Envoi planifié | `TaskAliasVO` |
-| `sendRecurring(NotifiableInterface, NotificationMessageVO, SendRecurringRecord)` | Envoi récurrent | `TaskAliasVO` |
-| `cancel(string $signature)` | Annuler une tâche | `bool` |
-| `pause(string $signature)` | Mettre en pause | `bool` |
-| `resume(string $signature)` | Reprendre | `bool` |
-| `changeInterval(string $signature, int $newIntervalSeconds)` | Modifier l'intervalle | `bool` |
-| `getStats(NotifiableInterface&Model $notifiable)` | Statistiques globales | `NotificationStatsVO` |
-| `getSessionStats(string $sessionId)` | Statistiques d'une session | `SessionStatsRecord` |
+| `withOptions(SendOptions $options): self` | Définit les options pour le prochain envoi | `self` |
+| `resetOptions(): self` | Réinitialise les options en attente | `self` |
+| `sendNow(NotifiableInterface, NotificationMessageVO, ?SendNowRecord): SendResultCollection` | Envoi immédiat | `SendResultCollection` |
+| `sendLater(NotifiableInterface, NotificationMessageVO, ?SendLaterRecord): TaskAliasVO` | Envoi différé | `TaskAliasVO` |
+| `sendAt(NotifiableInterface, NotificationMessageVO, ?SendAtRecord): TaskAliasVO` | Envoi planifié | `TaskAliasVO` |
+| `sendRecurring(NotifiableInterface, NotificationMessageVO, ?SendRecurringRecord): TaskAliasVO` | Envoi récurrent | `TaskAliasVO` |
+| `cancel(string $signature): bool` | Annuler une tâche | `bool` |
+| `pause(string $signature): bool` | Mettre en pause | `bool` |
+| `resume(string $signature): bool` | Reprendre | `bool` |
+| `changeInterval(string $signature, int $newIntervalSeconds): bool` | Modifier l'intervalle | `bool` |
+| `getStats(NotifiableInterface&Model $notifiable): NotificationStatsVO` | Statistiques globales | `NotificationStatsVO` |
+| `getSessionStats(string $sessionId): SessionStatsRecord` | Statistiques d'une session | `SessionStatsRecord` |
+
+### NotifiableBuilder
+
+| Méthode | Description | Retour |
+|---------|-------------|--------|
+| `static create(?NotificationService $service): self` | Crée une nouvelle instance | `self` |
+| `to(string $channelClass, string|array $destination): self` | Définit la destination pour un canal | `self` |
+| `body(string $body): self` | Définit le corps du message | `self` |
+| `subject(string $subject): self` | Définit le sujet du message | `self` |
+| `type(string $type): self` | Définit le type du message | `self` |
+| `data(array $data): self` | Définit les données supplémentaires | `self` |
+| `limit(int $limit): self` | Définit la limite par canal | `self` |
+| `filter(string $channelClass, string|array $destinations): self` | Ajoute un filtre de destination | `self` |
+| `filters(array $filters): self` | Remplace tous les filtres | `self` |
+| `options(SendOptions $options): self` | Définit les options d'envoi | `self` |
+| `metadata(string $channelClass, StrictDataObject $metadata): self` | Ajoute des métadonnées | `self` |
+| `metadataAll(StrictDataObject $metadata): self` | Ajoute des métadonnées à tous les canaux | `self` |
+| `as(string $morphClass, int|string $key): self` | Définit la classe morph et la clé | `self` |
+| `sendNow(?SendNowRecord $record): SendResultCollection` | Envoi immédiat | `SendResultCollection` |
+| `sendLater(int $delaySeconds): TaskAliasVO` | Envoi différé | `TaskAliasVO` |
+| `sendAt(NotificationDateTimeVO $scheduledAt): TaskAliasVO` | Envoi planifié | `TaskAliasVO` |
+| `sendRecurring(int $intervalSeconds, NotificationDateTimeVO $startAt, ?NotificationDateTimeVO $endAt): TaskAliasVO` | Envoi récurrent | `TaskAliasVO` |
+| `reset(): self` | Réinitialise le builder | `self` |
+
+### SendOptions
+
+| Méthode | Description | Retour |
+|---------|-------------|--------|
+| `static init(): self` | Crée une nouvelle instance | `self` |
+| `withChannel(string $channelClass): self` | Ajoute un canal | `self` |
+| `withChannels(array $channelClasses): self` | Ajoute plusieurs canaux | `self` |
+| `withLimitPerChannel(int $limit): self` | Définit la limite par canal | `self` |
+| `withDestinationFilter(string $channelClass, string|array $destinations): self` | Ajoute un filtre de destination | `self` |
+| `withDestinationFilters(array $filters): self` | Remplace tous les filtres | `self` |
+| `getDestinationFilters(): ?StrictAssociative` | Récupère les filtres | `?StrictAssociative` |
 
 ### SendResultCollection
 
@@ -1045,6 +1518,10 @@ $record = SendNowRecord::from([
 | `delivered: int` | Nombre de DELIVERED |
 | `pending: int` | Nombre de PENDING |
 | `success_rate: float` | Taux de succès (%) |
+| `getPercentageSent(): float` | Pourcentage envoyé |
+| `getPercentageFailed(): float` | Pourcentage échoué |
+| `isSuccess(): bool` | Tout a réussi |
+| `hasFailures(): bool` | Au moins un échec |
 
 ### SessionStatsRecord
 

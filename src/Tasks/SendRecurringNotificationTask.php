@@ -16,21 +16,8 @@ use Illuminate\Contracts\Foundation\Application;
 use InvalidArgumentException;
 use RuntimeException;
 
-/**
- * Task for sending recurring notifications to notifiable entities.
- *
- * This task retrieves a notifiable model (User, etc.) and sends a notification
- * using the NotificationSenderProcessor at regular intervals.
- */
 final class SendRecurringNotificationTask extends AbstractRecurringTask
 {
-    /**
-     * Validate the payload before execution.
-     *
-     * @param  StrictDataObject  $payload  The task payload
-     *
-     * @throws InvalidArgumentException If the payload is invalid
-     */
     protected function before(StrictDataObject $payload): void
     {
         $record = NotificationTaskPayloadRecord::from($payload);
@@ -51,20 +38,18 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
             throw new InvalidArgumentException('Notification subject is required');
         }
 
-        if (empty($record->channels)) {
+        if ($record->channels->isEmpty()) {
             throw new InvalidArgumentException('At least one notification channel is required');
         }
 
-        if (isset($payload->interval_seconds) && $payload->interval_seconds < 60) {
+        // ✅ Vérifier l'intervalle depuis le contexte de la tâche récurrente
+        $intervalSeconds = $this->context->getIntervalSeconds();
+
+        if ($intervalSeconds !== null && $intervalSeconds->getValue() < 60) {
             throw new InvalidArgumentException('Interval must be at least 60 seconds for recurring notifications');
         }
     }
 
-    /**
-     * Execute the main business logic.
-     *
-     * @throws RuntimeException If the notifiable entity is not found
-     */
     protected function process(): void
     {
         $payload = NotificationTaskPayloadRecord::from($this->context->getPayload());
@@ -74,7 +59,12 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
         $message = $this->createNotificationMessage($payload);
         $processRecord = $this->createProcessRecord($payload);
 
-        $this->sendNotification($notifiable, $message, $processRecord);
+        $this->sendNotification(
+            $notifiable,
+            $message,
+            $processRecord,
+            $payload->destination_filter?->toArray()
+        );
 
         $this->info(new DescriptionVO(sprintf(
             'Recurring notification sent to %s #%d',
@@ -83,12 +73,6 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
         )));
     }
 
-    /**
-     * Hook executed after the main processing.
-     *
-     * @param  bool  $success  Indicates whether the task completed successfully
-     * @param  DescriptionVO|null  $error  Error description when task failed
-     */
     protected function after(bool $success, ?DescriptionVO $error = null): void
     {
         $payload = NotificationTaskPayloadRecord::from($this->context->getPayload());
@@ -107,7 +91,6 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
                 $error?->getValue() ?? 'Unknown error'
             )));
 
-            // Log the failure with structured logging
             $logPayload = StrictDataObject::from([
                 'event' => 'recurring_notification_task_failed',
                 'notifiable_type' => $payload->notifiable_type,
@@ -123,14 +106,6 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
         }
     }
 
-    /**
-     * Find the notifiable entity.
-     *
-     * @param  NotificationTaskPayloadRecord  $payload  The task payload
-     * @return object The notifiable entity
-     *
-     * @throws RuntimeException If the notifiable entity is not found
-     */
     private function findNotifiable(NotificationTaskPayloadRecord $payload): object
     {
         /** @var class-string $notifiableType */
@@ -148,12 +123,6 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
         return $notifiable;
     }
 
-    /**
-     * Create the notification message.
-     *
-     * @param  NotificationTaskPayloadRecord  $payload  The task payload
-     * @return NotificationMessageVO The notification message
-     */
     private function createNotificationMessage(NotificationTaskPayloadRecord $payload): NotificationMessageVO
     {
         return new NotificationMessageVO(
@@ -164,12 +133,6 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
         );
     }
 
-    /**
-     * Create the process record.
-     *
-     * @param  NotificationTaskPayloadRecord  $payload  The task payload
-     * @return ProcessNotificationRecord The process record
-     */
     private function createProcessRecord(NotificationTaskPayloadRecord $payload): ProcessNotificationRecord
     {
         return new ProcessNotificationRecord(
@@ -178,28 +141,17 @@ final class SendRecurringNotificationTask extends AbstractRecurringTask
         );
     }
 
-    /**
-     * Send the notification.
-     *
-     * @param  object  $notifiable  The notifiable entity
-     * @param  NotificationMessageVO  $message  The notification message
-     * @param  ProcessNotificationRecord  $processRecord  The process record
-     */
     private function sendNotification(
         object $notifiable,
         NotificationMessageVO $message,
-        ProcessNotificationRecord $processRecord
+        ProcessNotificationRecord $processRecord,
+        ?array $destinationFilters
     ): void {
         /** @var NotificationSenderProcessor $processor */
         $processor = $this->getApplication()->make(NotificationSenderProcessor::class);
-        $processor->send($notifiable, $message, $processRecord);
+        $processor->send($notifiable, $message, $processRecord, $destinationFilters);
     }
 
-    /**
-     * Get the Laravel application instance.
-     *
-     * @return Application The application container
-     */
     private function getApplication(): Application
     {
         return $this->context->getLaravelApp();

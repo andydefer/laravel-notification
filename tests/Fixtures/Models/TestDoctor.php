@@ -7,9 +7,9 @@ namespace AndyDefer\LaravelNotification\Tests\Fixtures\Models;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Channels\SmsChannel;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
+use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use Illuminate\Database\Eloquent\Model;
 
@@ -29,61 +29,69 @@ final class TestDoctor extends Model implements NotifiableInterface
     {
         $collection = new NotificationRouteCollection;
 
-        // ✅ Canal Mail avec email principal
         if ($this->primary_email) {
             $collection->add(
                 new NotificationRouteVO(
                     channelClass: MailChannel::class,
                     destination: $this->primary_email,
                     metadata: new StrictDataObject([
-                        'name' => $this->name,
                         'type' => 'primary',
+                        'specialty' => $this->specialty ?? 'general',
                     ])
                 )
             );
         }
 
-        // ✅ Canal Mail avec email secondaire
         if ($this->secondary_email) {
             $collection->add(
                 new NotificationRouteVO(
                     channelClass: MailChannel::class,
                     destination: $this->secondary_email,
                     metadata: new StrictDataObject([
-                        'name' => $this->name,
                         'type' => 'secondary',
+                        'specialty' => $this->specialty ?? 'general',
                     ])
                 )
             );
         }
 
-        // ✅ Canal Database
         $collection->add(
             new NotificationRouteVO(
                 channelClass: DatabaseChannel::class,
                 destination: 'database',
                 metadata: new StrictDataObject([
                     'type' => 'database',
-                    'specialty' => $this->specialty,
+                    'specialty' => $this->specialty ?? 'general',
                 ])
             )
         );
 
+        // ✅ Utiliser TestChannel au lieu de SmsChannel
         if ($this->phone) {
             $collection->add(
                 new NotificationRouteVO(
-                    channelClass: SmsChannel::class,
+                    channelClass: TestChannel::class,
                     destination: $this->phone,
+                    metadata: new StrictDataObject(['type' => 'phone'])
                 )
             );
         }
+
+        // ✅ Canal de test
+        $collection->add(
+            new NotificationRouteVO(
+                channelClass: TestChannel::class,
+                destination: 'test_doctor',
+                metadata: new StrictDataObject(['type' => 'test'])
+            )
+        );
 
         return $collection;
     }
 
     public function getMorphClass(): string
     {
-        return self::class;
+        return TestDoctor::class;
     }
 
     public function getKey(): int

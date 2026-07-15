@@ -2,7 +2,7 @@
 
 ## Description
 
-Tâche unique (`AbstractUniqueTask`) pour l'envoi de notifications différées. Récupère l'entité notifiable, construit le message et exécute l'envoi via `NotificationSenderProcessor`.
+`SendDelayedNotificationTask` est une tâche unique qui exécute l'envoi d'une notification différée. Elle est créée automatiquement par le service de notification lorsqu'un envoi différé ou planifié est demandé, et s'exécute à la date/heure prévue.
 
 ## Hiérarchie / Implémentations
 
@@ -11,243 +11,216 @@ AbstractUniqueTask
     └── SendDelayedNotificationTask (final)
 ```
 
+**Classe parente :** `AbstractUniqueTask` - Classe de base pour les tâches uniques
+
 ## Rôle principal
 
-**Point d'entrée pour l'envoi de notifications planifiées :**
+Cette tâche agit comme le pont entre le système de planification et le processeur de notifications :
 
-1. **Validation** (`before()`) : Vérifie l'intégrité du payload
-2. **Exécution** (`process()`) : Récupère l'entité et envoie la notification
-3. **Finalisation** (`after()`) : Loggue le résultat
-
----
+1. **Validation du payload** - Vérifie l'intégrité des données avant exécution
+2. **Récupération de l'entité** - Trouve le notifiable (User, Order, etc.) en base de données
+3. **Construction du message** - Reconstruit le message de notification à partir du payload
+4. **Envoi de la notification** - Délègue l'envoi au `NotificationSenderProcessor`
+5. **Journalisation** - Log le succès ou l'échec de l'exécution
 
 ## API / Méthodes publiques
 
-### `before(StrictDataObject $payload): void`
+La classe hérite de `AbstractUniqueTask` et n'ajoute pas de méthodes publiques supplémentaires. L'exécution est déclenchée par le système de tâches via la méthode `run()`.
 
-| Paramètre | Type | Description |
-|-----------|------|-------------|
-| `$payload` | `StrictDataObject` | Le payload de la tâche |
+## Flux d'exécution
 
-**Retourne :** `void`
-
-**Exceptions :** `InvalidArgumentException` si le payload est invalide
-
-**Exemple :**
-```php
-protected function before(StrictDataObject $payload): void
-{
-    // Validation automatique via NotificationTaskPayloadRecord
-    // Lance une exception si un champ requis est manquant
-}
 ```
-
----
-
-### `process(): void`
-
-| Paramètre | Type | Description |
-|-----------|------|-------------|
-| Aucun | - | - |
-
-**Retourne :** `void`
-
-**Exceptions :** `RuntimeException` si l'entité notifiable n'est pas trouvée
-
-**Exemple :**
-```php
-protected function process(): void
-{
-    $payload = NotificationTaskPayloadRecord::from($this->context->getPayload());
-    $notifiable = $this->findNotifiable($payload);
-    // ... envoi de la notification
-}
+SendDelayedNotificationTask::run()
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. before() - Validation du payload                            │
+│    ├── notifiable_type requis                                  │
+│    ├── notifiable_id requis                                    │
+│    ├── body requis                                             │
+│    ├── subject requis                                          │
+│    └── channels non vides                                      │
+└────────────────────────┬────────────────────────────────────────┘
+                         │ (si valide)
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. process() - Exécution principale                            │
+│    ├── findNotifiable() → récupère l'entité                    │
+│    ├── createNotificationMessage() → construit le message      │
+│    ├── createProcessRecord() → configure l'envoi               │
+│    └── sendNotification() → délègue au processor               │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. after() - Post-exécution                                    │
+│    ├── Succès → log info                                       │
+│    └── Échec → log error avec le message d'erreur              │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
----
-
-### `after(bool $success, ?DescriptionVO $error = null): void`
-
-| Paramètre | Type | Description |
-|-----------|------|-------------|
-| `$success` | `bool` | Indique si la tâche a réussi |
-| `$error` | `?DescriptionVO` | Description de l'erreur (si échec) |
-
-**Retourne :** `void`
-
-**Exceptions :** Aucune
-
-**Exemple :**
-```php
-protected function after(bool $success, ?DescriptionVO $error = null): void
-{
-    if ($success) {
-        $this->info(new DescriptionVO('Notification envoyée avec succès'));
-    } else {
-        $this->error(new DescriptionVO('Échec de l\'envoi: ' . $error?->getValue()));
-    }
-}
-```
-
----
 
 ## Cas d'utilisation
 
-### Cas 1 : Envoi d'un email 30 minutes après l'inscription
+### Cas 1 : Envoi d'email de bienvenue 5 minutes après l'inscription
 
 ```php
 <?php
 
 use AndyDefer\LaravelNotification\Tasks\SendDelayedNotificationTask;
-use AndyDefer\LaravelNotification\Records\NotificationTaskPayloadRecord;
-use AndyDefer\LaravelNotification\Records\SendLaterRecord;
-use AndyDefer\LaravelNotification\Services\NotificationService;
-use AndyDefer\Task\ValueObjects\Iso8601DateTimeVO;
+use AndyDefer\Task\Records\UniqueTaskConfigRecord;
 use AndyDefer\Task\ValueObjects\UniqueTaskFqcnVO;
+use AndyDefer\Task\ValueObjects\Iso8601DateTimeVO;
 
-$payload = NotificationTaskPayloadRecord::from([
-    'notifiable_type' => App\Models\User::class,
+// La tâche est créée automatiquement par NotificationService::sendLater()
+// Mais voici ce qui se passe en interne :
+
+$payload = StrictDataObject::from([
+    'notifiable_type' => User::class,
     'notifiable_id' => $user->id,
     'body' => 'Bienvenue sur notre plateforme !',
     'subject' => 'Bienvenue',
-    'type' => 'email',
-    'data' => ['user_id' => $user->id],
-    'channels' => [App\Notifications\Channels\EmailChannel::class],
+    'type' => 'welcome',
+    'data' => [],
+    'channels' => [MailChannel::class],
     'limit_per_channel' => 1,
 ]);
 
 $config = UniqueTaskConfigRecord::from([
-    'description' => 'Email de bienvenue - ' . $user->email,
-    'scheduled_at' => new Iso8601DateTimeVO(now()->addMinutes(30)->toIso8601String()),
+    'description' => 'Delayed notification: Bienvenue',
+    'scheduled_at' => new Iso8601DateTimeVO(now()->addMinutes(5)),
     'max_attempts' => 3,
     'grace_period' => 86400,
 ]);
 
-$task = new SendDelayedNotificationTask();
-$alias = $task->register(
+// Enregistrement de la tâche
+$alias = $uniqueTaskService->register(
     new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
-    StrictDataObject::from($payload->toArray()),
+    $payload,
     $config
 );
+
+// La tâche s'exécutera automatiquement dans 5 minutes
 ```
 
----
-
-### Cas 2 : Utilisation via NotificationService
+### Cas 2 : Rappel de rendez-vous 24h à l'avance
 
 ```php
 <?php
 
-use AndyDefer\LaravelNotification\Services\NotificationService;
-use AndyDefer\LaravelNotification\Records\SendLaterRecord;
+use AndyDefer\LaravelNotification\Tasks\SendDelayedNotificationTask;
 
-$service = app(NotificationService::class);
-
-$record = SendLaterRecord::from([
-    'delay_seconds' => 900, // 15 minutes
-    'channels' => [EmailChannel::class, SmsChannel::class],
+// Création d'un rappel de rendez-vous
+$payload = StrictDataObject::from([
+    'notifiable_type' => Patient::class,
+    'notifiable_id' => $patient->id,
+    'body' => 'Rappel : Rendez-vous demain à 10h00.',
+    'subject' => 'Rappel de rendez-vous',
+    'type' => 'appointment_reminder',
+    'data' => ['appointment_id' => $appointment->id],
+    'channels' => [MailChannel::class, SmsChannel::class],
     'limit_per_channel' => 1,
 ]);
 
-$message = new NotificationMessageVO(
-    subject: 'Rappel de rendez-vous',
-    body: 'Votre rendez-vous est dans 15 minutes.'
+// La tâche est programmée pour s'exécuter 24h avant le rendez-vous
+$scheduledAt = $appointment->start_at->subDay();
+
+$config = UniqueTaskConfigRecord::from([
+    'description' => 'Appointment reminder for patient #' . $patient->id,
+    'scheduled_at' => new Iso8601DateTimeVO($scheduledAt->toIso8601String()),
+    'max_attempts' => 3,
+    'grace_period' => 3600, // 1h de grâce
+]);
+
+$alias = $uniqueTaskService->register(
+    new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+    $payload,
+    $config
 );
-
-$alias = $service->sendLater($user, $message, $record);
-// La tâche SendDelayedNotificationTask est automatiquement planifiée
 ```
-
----
-
-## Flux d'exécution
-
-```
-1. Tâche planifiée (par cron)
-    ↓
-2. before() → Validation du payload
-    ↓
-3. process() → Récupération du payload
-    ↓
-4. findNotifiable() → Recherche de l'entité
-    ↓
-5. createNotificationMessage() → Construction du message
-    ↓
-6. createProcessRecord() → Construction du record
-    ↓
-7. sendNotification() → Envoi via NotificationSenderProcessor
-    ↓
-8. after() → Logging du résultat
-```
-
----
 
 ## Gestion des erreurs
 
 | Situation | Exception | Message |
 |-----------|-----------|---------|
-| Notifiable type manquant | `InvalidArgumentException` | `Notifiable type is required` |
-| Notifiable ID manquant | `InvalidArgumentException` | `Notifiable ID is required` |
-| Body manquant | `InvalidArgumentException` | `Notification body is required` |
-| Subject manquant | `InvalidArgumentException` | `Notification subject is required` |
-| Aucun canal | `InvalidArgumentException` | `At least one notification channel is required` |
-| Entité non trouvée | `RuntimeException` | `Notifiable not found: {type} #{id}` |
-
----
+| `notifiable_type` manquant | `InvalidArgumentException` | `Notifiable type is required` |
+| `notifiable_id` manquant | `InvalidArgumentException` | `Notifiable ID is required` |
+| `body` manquant | `InvalidArgumentException` | `Notification body is required` |
+| `subject` manquant | `InvalidArgumentException` | `Notification subject is required` |
+| Canaux vides | `InvalidArgumentException` | `At least one notification channel is required` |
+| Notifiable introuvable | `RuntimeException` | `Notifiable not found: {type} #{id}` |
 
 ## Intégration
 
-### Dans le service provider
+### Dépendances injectées via le contexte
+
+```
+SendDelayedNotificationTask
+    └── AbstractUniqueTask
+        └── Contexte de tâche (RecurringTaskContext)
+            ├── getPayload() → StrictDataObject
+            ├── getAlias() → TaskAliasVO
+            └── getLaravelApp() → Application
+```
+
+### Relations avec les autres composants
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    UniqueTaskService                            │
+│              (gestionnaire de tâches)                           │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              SendDelayedNotificationTask                       │
+│              (tâche de notification différée)                  │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              NotificationSenderProcessor                       │
+│              (processeur d'envoi)                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### NotificationTaskPayloadRecord
+
+Le payload stocké dans la tâche contient toutes les informations nécessaires :
 
 ```php
-<?php
-
-namespace App\Providers;
-
-use AndyDefer\LaravelNotification\Tasks\SendDelayedNotificationTask;
-use AndyDefer\Task\Contracts\Services\UniqueTaskServiceInterface;
-use Illuminate\Support\ServiceProvider;
-
-final class NotificationTaskServiceProvider extends ServiceProvider
-{
-    public function register(): void
-    {
-        // La tâche est automatiquement disponible via le conteneur
-        $this->app->bind(SendDelayedNotificationTask::class);
-    }
-}
+NotificationTaskPayloadRecord::from([
+    'notifiable_type' => 'App\\Models\\User',
+    'notifiable_id' => 123,
+    'body' => new MessageBodyVO('Message body'),
+    'subject' => new MessageSubjectVO('Subject'),
+    'type' => 'welcome',
+    'data' => new StrictDataObject(['user_id' => 123]),
+    'channels' => FqcnChannelCollection,
+    'limit_per_channel' => 1,
+    'destination_filter' => StrictAssociative,
+]);
 ```
-
-### Dans une commande
-
-```bash
-# Exécuter manuellement une tâche planifiée
-./vendor/bin/directive process-tasks --unique-only
-```
-
----
 
 ## Performance
 
-| Opération | Complexité | Notes |
-|-----------|------------|-------|
-| `before()` | O(1) | Validation simple |
-| `process()` | O(n) | n = nombre de routes |
-| `findNotifiable()` | O(1) | Requête Eloquent par ID |
-| `sendNotification()` | O(n) | n = nombre de routes |
-
----
+| Opération | Complexité | Description |
+|-----------|-----------|-------------|
+| `before()` | O(1) | Validation des données |
+| `findNotifiable()` | O(1) | Recherche Eloquent par ID |
+| `createNotificationMessage()` | O(1) | Construction du message |
+| `sendNotification()` | O(n) | n = nombre de routes de notification |
+| `after()` | O(1) | Journalisation |
 
 ## Compatibilité
 
 | Version | Support |
 |---------|---------|
 | PHP 8.1+ | ✅ Complet |
-| Laravel 10.x | ✅ Complet |
-| Laravel 11.x | ✅ Complet |
+| PHP 8.0 | ✅ Complet |
 | Laravel 12.x | ✅ Complet |
-
----
+| Laravel 13.x | ✅ Complet |
+| Laravel 14.x | ✅ Complet |
+| Laravel 15.x | ✅ Complet |
 
 ## Exemple complet
 
@@ -258,47 +231,114 @@ declare(strict_types=1);
 
 use AndyDefer\LaravelNotification\Tasks\SendDelayedNotificationTask;
 use AndyDefer\LaravelNotification\Records\NotificationTaskPayloadRecord;
+use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
+use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
+use AndyDefer\LaravelNotification\Channels\MailChannel;
+use AndyDefer\LaravelNotification\Channels\SmsChannel;
+use AndyDefer\LaravelNotification\Collections\FqcnChannelCollection;
+use AndyDefer\DomainStructures\Utils\StrictDataObject;
+use AndyDefer\Task\ValueObjects\TaskAliasVO;
 use AndyDefer\Task\ValueObjects\Iso8601DateTimeVO;
-use AndyDefer\Task\ValueObjects\UniqueTaskFqcnVO;
-use AndyDefer\Task\ValueObjects\UniqueTaskConfigRecord;
-use AndyDefer\Task\Contracts\Services\UniqueTaskServiceInterface;
-use App\Models\User;
-use App\Notifications\Channels\EmailChannel;
 
-// 1. Création du payload
-$payload = NotificationTaskPayloadRecord::from([
-    'notifiable_type' => User::class,
-    'notifiable_id' => 123,
-    'body' => '<h1>Bonjour !</h1><p>Votre compte a été créé avec succès.</p>',
-    'subject' => 'Bienvenue sur notre plateforme',
-    'type' => 'welcome',
-    'data' => ['user_id' => 123, 'welcome_code' => 'ABC-123'],
-    'channels' => [EmailChannel::class],
-    'limit_per_channel' => 1,
-]);
+class DelayedNotificationService
+{
+    public function scheduleNotification(
+        User $user,
+        string $body,
+        string $subject,
+        int $delaySeconds,
+        array $channels = [MailChannel::class]
+    ): TaskAliasVO {
+        // 1. Construction du payload
+        $channelsCollection = new FqcnChannelCollection;
+        foreach ($channels as $channel) {
+            $channelsCollection->add(new FqcnChannelVO($channel));
+        }
 
-// 2. Création de la configuration
-$config = UniqueTaskConfigRecord::from([
-    'description' => 'Email de bienvenue pour user #123',
-    'scheduled_at' => new Iso8601DateTimeVO('2026-07-07 10:00:00'),
-    'max_attempts' => 3,
-    'grace_period' => 86400,
-]);
+        $payload = StrictDataObject::from([
+            'notifiable_type' => get_class($user),
+            'notifiable_id' => $user->id,
+            'body' => new MessageBodyVO($body),
+            'subject' => new MessageSubjectVO($subject),
+            'type' => 'custom',
+            'data' => new StrictDataObject(['user_id' => $user->id]),
+            'channels' => $channelsCollection,
+            'limit_per_channel' => 1,
+        ]);
 
-// 3. Enregistrement de la tâche
-$taskService = app(UniqueTaskServiceInterface::class);
-$alias = $taskService->register(
-    new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
-    StrictDataObject::from($payload->toArray()),
-    $config
+        // 2. Configuration de la tâche
+        $scheduledAt = new Iso8601DateTimeVO(now()->addSeconds($delaySeconds));
+
+        $config = UniqueTaskConfigRecord::from([
+            'description' => 'Delayed notification: ' . $subject,
+            'scheduled_at' => $scheduledAt,
+            'max_attempts' => 3,
+            'grace_period' => 86400,
+        ]);
+
+        // 3. Enregistrement de la tâche
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        return $alias;
+    }
+
+    public function cancelDelayedNotification(string $alias): bool
+    {
+        return $this->uniqueTaskService->cancel(new TaskAliasVO($alias));
+    }
+
+    public function getTaskStatus(string $alias): array
+    {
+        $task = $this->uniqueTaskRepository->findByAlias(new TaskAliasVO($alias));
+
+        if (!$task) {
+            return ['status' => 'not_found'];
+        }
+
+        return [
+            'status' => $task->getStatus()->value,
+            'scheduled_at' => $task->getScheduledAt()->getValue(),
+            'attempts' => $task->getAttempts()->getValue(),
+            'max_attempts' => $task->getMaxAttempts()->getValue(),
+        ];
+    }
+}
+
+// Utilisation
+$service = new DelayedNotificationService($uniqueTaskService, $uniqueTaskRepository);
+
+// Planifier un email dans 30 minutes
+$alias = $service->scheduleNotification(
+    $user,
+    'Votre rapport est prêt.',
+    'Rapport disponible',
+    1800,
+    [MailChannel::class]
 );
 
-echo "Tâche planifiée avec l'alias : " . $alias->getValue() . "\n";
+echo "📅 Notification planifiée\n";
+echo "🔑 Alias : " . $alias->getValue() . "\n";
 
-// 4. Exécution de la tâche (lorsque la date est atteinte)
-// La tâche sera exécutée automatiquement par process-tasks
+// Vérifier le statut
+$status = $service->getTaskStatus($alias->getValue());
+echo "📊 Statut : " . $status['status'] . "\n";
 
-// 5. Vérification du résultat
-$debug = $taskService->getDebug($alias);
-echo "Statut : " . $debug->status . "\n";
+// Annuler si nécessaire
+if ($shouldCancel) {
+    $service->cancelDelayedNotification($alias->getValue());
+    echo "🚫 Tâche annulée\n";
+}
 ```
+
+## Voir aussi
+- `AbstractUniqueTask` - Classe parente pour les tâches uniques
+- `NotificationTaskPayloadRecord` - Record du payload
+- `NotificationSenderProcessor` - Processeur d'envoi
+- `UniqueTaskService` - Service de gestion des tâches uniques
+- `SendDelayedNotificationTask` - Cette classe
+- `SendRecurringNotificationTask` - Tâche récurrente similaire
+- `NotificationMessageVO` - Value Object du message

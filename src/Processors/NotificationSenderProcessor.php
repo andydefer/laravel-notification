@@ -26,20 +26,8 @@ use AndyDefer\Logger\Records\LogDataRecord;
 use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
-/**
- * Processor for sending notifications.
- *
- * Orchestrates the notification sending process by resolving routes,
- * creating notifications, and dispatching through appropriate drivers.
- */
 final class NotificationSenderProcessor implements NotificationSenderProcessorInterface
 {
-    /**
-     * Constructor for the notification sender processor.
-     *
-     * @param  NotificationRepositoryInterface  $notificationRepository  The notification repository
-     * @param  LoggerInterface  $logger  The logger instance
-     */
     public function __construct(
         private readonly NotificationRepositoryInterface $notificationRepository,
         private readonly LoggerInterface $logger,
@@ -51,7 +39,8 @@ final class NotificationSenderProcessor implements NotificationSenderProcessorIn
     public function send(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        ProcessNotificationRecord $processRecord
+        ProcessNotificationRecord $processRecord,
+        ?array $destinationFilters = null
     ): SendResultCollection {
         $availableRoutes = $notifiable->getNotificationChannels();
 
@@ -61,6 +50,21 @@ final class NotificationSenderProcessor implements NotificationSenderProcessorIn
             throw new RuntimeException(
                 sprintf(
                     'No available channels for notifiable %s#%d',
+                    $notifiable->getMorphClass(),
+                    $notifiable->getKey()
+                )
+            );
+        }
+
+        // ✅ Appliquer les filtres de destination si présents
+        if ($destinationFilters !== null && ! empty($destinationFilters)) {
+            $routes = $this->applyDestinationFilters($routes, $destinationFilters);
+        }
+
+        if ($routes->isEmpty()) {
+            throw new RuntimeException(
+                sprintf(
+                    'No routes after applying destination filters for notifiable %s#%d',
                     $notifiable->getMorphClass(),
                     $notifiable->getKey()
                 )
@@ -98,47 +102,36 @@ final class NotificationSenderProcessor implements NotificationSenderProcessorIn
     }
 
     /**
-     * Send a notification via a specific driver.
+     * Apply destination filters to routes.
      *
-     * @param  Notification  $notification  The notification record
-     * @param  NotificationMessageVO  $message  The notification message
-     * @param  NotificationRouteVO  $route  The notification route
-     * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
-     * @param  UuidVO  $sessionId  The session ID
-     * @return SendResultRecord The send result
+     * @param  NotificationRouteCollection  $routes  The routes to filter
+     * @param  array<string, array<string>>  $destinationFilter  Channel class => destinations
+     * @return NotificationRouteCollection The filtered routes
      */
-    private function sendViaDriver(
-        Notification $notification,
-        NotificationMessageVO $message,
-        NotificationRouteVO $route,
-        NotifiableInterface&Model $notifiable,
-        UuidVO $sessionId
-    ): SendResultRecord {
-        try {
-            $driver = $route->createDriver();
-            $result = $driver->send($message, $route);
+    private function applyDestinationFilters(
+        NotificationRouteCollection $routes,
+        array $destinationFilter
+    ): NotificationRouteCollection {
+        $filteredRoutes = new NotificationRouteCollection;
 
-            $this->notificationRepository->update($notification->getId(), NotificationRecord::from([
-                'status' => NotificationStatus::SENT,
-                'sent_at' => now(),
-            ]));
+        foreach ($routes as $route) {
+            $channelClass = $route->getChannelClass();
+            $destination = $route->getDestination();
 
-            return $result;
-        } catch (\Exception $e) {
-            $this->logChannelFailure($route, $notifiable, $sessionId, $e);
+            if (isset($destinationFilter[$channelClass])) {
+                $allowedDestinations = $destinationFilter[$channelClass];
 
-            $this->notificationRepository->update($notification->getId(), NotificationRecord::from([
-                'status' => NotificationStatus::FAILED,
-                'error' => $e->getMessage(),
-            ]));
-
-            return new SendResultRecord(
-                channel: new FqcnChannelVO($route->getChannelClass()),
-                destination: $route->getDestination(),
-                success: false,
-                error_message: ErrorMessageVO::from($e->getMessage()),
-            );
+                if (is_array($allowedDestinations) && in_array($destination, $allowedDestinations, true)) {
+                    $filteredRoutes->add($route);
+                } elseif (is_string($allowedDestinations) && $destination === $allowedDestinations) {
+                    $filteredRoutes->add($route);
+                }
+            } else {
+                $filteredRoutes->add($route);
+            }
         }
+
+        return $filteredRoutes;
     }
 
     /**
@@ -232,6 +225,50 @@ final class NotificationSenderProcessor implements NotificationSenderProcessorIn
         ]);
 
         return $this->notificationRepository->create($record);
+    }
+
+    /**
+     * Send a notification via a specific driver.
+     *
+     * @param  Notification  $notification  The notification record
+     * @param  NotificationMessageVO  $message  The notification message
+     * @param  NotificationRouteVO  $route  The notification route
+     * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
+     * @param  UuidVO  $sessionId  The session ID
+     * @return SendResultRecord The send result
+     */
+    private function sendViaDriver(
+        Notification $notification,
+        NotificationMessageVO $message,
+        NotificationRouteVO $route,
+        NotifiableInterface&Model $notifiable,
+        UuidVO $sessionId
+    ): SendResultRecord {
+        try {
+            $driver = $route->createDriver();
+            $result = $driver->send($message, $route);
+
+            $this->notificationRepository->update($notification->getId(), NotificationRecord::from([
+                'status' => NotificationStatus::SENT,
+                'sent_at' => now(),
+            ]));
+
+            return $result;
+        } catch (\Exception $e) {
+            $this->logChannelFailure($route, $notifiable, $sessionId, $e);
+
+            $this->notificationRepository->update($notification->getId(), NotificationRecord::from([
+                'status' => NotificationStatus::FAILED,
+                'error' => $e->getMessage(),
+            ]));
+
+            return new SendResultRecord(
+                channel: new FqcnChannelVO($route->getChannelClass()),
+                destination: $route->getDestination(),
+                success: false,
+                error_message: ErrorMessageVO::from($e->getMessage()),
+            );
+        }
     }
 
     /**

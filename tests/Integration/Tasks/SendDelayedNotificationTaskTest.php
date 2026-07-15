@@ -7,10 +7,10 @@ namespace AndyDefer\LaravelNotification\Tests\Integration\Tasks;
 use AndyDefer\DomainStructures\Services\HydrationService;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Channels\SmsChannel;
 use AndyDefer\LaravelNotification\Collections\FqcnChannelCollection;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Tasks\SendDelayedNotificationTask;
+use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Models\TestUser;
 use AndyDefer\LaravelNotification\Tests\TestCase;
 use AndyDefer\Logger\Contracts\LoggerInterface;
@@ -28,6 +28,7 @@ use AndyDefer\Task\ValueObjects\TaskAliasVO;
 use AndyDefer\Task\ValueObjects\UniqueTaskFqcnVO;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 final class SendDelayedNotificationTaskTest extends TestCase
 {
@@ -45,13 +46,13 @@ final class SendDelayedNotificationTaskTest extends TestCase
     {
         parent::setUp();
 
-        // Arrange : Create a test user
         $this->user = TestUser::create([
             'name' => 'John Doe',
             'email' => 'john@example.com',
+            'email_secondary' => 'admin@example.com', // ✅ Ajouté
+            'phone' => '+33123456789',
         ]);
 
-        // Arrange : Get services from container
         $this->notificationService = $this->app->make(NotificationServiceInterface::class);
 
         $debugRepository = new TaskExecutionDebugRepository;
@@ -86,6 +87,7 @@ final class SendDelayedNotificationTaskTest extends TestCase
             'data' => $data['extra_data'] ?? [],
             'channels' => $data['channels'] ?? null,
             'limit_per_channel' => $data['limit_per_channel'] ?? null,
+            'destination_filter' => $data['destination_filter'] ?? null,
         ]);
     }
 
@@ -99,9 +101,10 @@ final class SendDelayedNotificationTaskTest extends TestCase
         );
     }
 
+    // ==================== TESTS: Basic Execution ====================
+
     public function test_register_and_execute_task(): void
     {
-        // Arrange : Freeze time and create task data
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -117,7 +120,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
         );
 
-        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -126,7 +128,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
         $result = $this->uniqueTaskService->run($alias);
 
-        // Assert : Verify task was executed successfully
         $this->assertInstanceOf(TaskAliasVO::class, $alias);
         $this->assertTrue($result->success);
 
@@ -142,7 +143,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_not_executed_when_scheduled_in_future(): void
     {
-        // Arrange : Freeze time and create task scheduled in future
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -157,22 +157,18 @@ final class SendDelayedNotificationTaskTest extends TestCase
             new Iso8601DateTimeVO($frozenNow->copy()->addHours(2)->toIso8601String())
         );
 
-        // Act : Register the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
             $config
         );
 
-        // Assert : Task should be PENDING
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(UniqueTaskStatus::PENDING, $taskModel->getStatus());
 
-        // Act : Try to run the task
         $result = $this->uniqueTaskService->run($alias);
 
-        // Assert : Task should not execute
         $this->assertFalse($result->success);
 
         $updatedTask = $this->uniqueTaskRepository->findByAlias($alias);
@@ -181,7 +177,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_fails_when_notifiable_not_found(): void
     {
-        // Arrange : Freeze time and create task with non-existent notifiable
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -201,7 +196,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
             1
         );
 
-        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -210,7 +204,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
         $result = $this->uniqueTaskService->run($alias);
 
-        // Assert : Task should fail
         $this->assertFalse($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
@@ -218,85 +211,8 @@ final class SendDelayedNotificationTaskTest extends TestCase
         $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
     }
 
-    public function test_register_and_execute_with_channels(): void
-    {
-        // Arrange : Freeze time and create task with channels
-        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
-        Carbon::setTestNow($frozenNow);
-
-        $payload = $this->createPayload([
-            'body' => 'Message avec canal mail',
-            'subject' => 'Test Canal',
-            'type' => 'channel_test',
-            'channels' => [MailChannel::class],
-        ]);
-
-        $config = $this->createConfig(
-            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
-        );
-
-        // Act : Register and run the task
-        $alias = $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
-            $payload,
-            $config
-        );
-
-        $result = $this->uniqueTaskService->run($alias);
-
-        // Assert : Task should succeed and create notification
-        $this->assertTrue($result->success);
-
-        $this->assertDatabaseHas('notifications', [
-            'notifiable_type' => TestUser::class,
-            'notifiable_id' => $this->user->getKey(),
-        ]);
-    }
-
-    public function test_register_and_execute_with_channel_collection(): void
-    {
-        // Arrange : Freeze time and create task with channel collection
-        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
-        Carbon::setTestNow($frozenNow);
-
-        $channels = FqcnChannelCollection::from([MailChannel::class, SmsChannel::class]);
-
-        $payload = StrictDataObject::from([
-            'notifiable_type' => TestUser::class,
-            'notifiable_id' => $this->user->getKey(),
-            'body' => 'Message avec canaux',
-            'subject' => 'Test Canaux',
-            'type' => 'channel_collection',
-            'data' => [],
-            'channels' => $channels,
-            'limit_per_channel' => null,
-        ]);
-
-        $config = $this->createConfig(
-            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
-        );
-
-        // Act : Register and run the task
-        $alias = $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
-            $payload,
-            $config
-        );
-
-        $result = $this->uniqueTaskService->run($alias);
-
-        // Assert : Task should succeed and create notification
-        $this->assertTrue($result->success);
-
-        $this->assertDatabaseHas('notifications', [
-            'notifiable_type' => TestUser::class,
-            'notifiable_id' => $this->user->getKey(),
-        ]);
-    }
-
     public function test_task_fails_when_class_not_found(): void
     {
-        // Arrange : Freeze time and create task with non-existent class
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
@@ -316,7 +232,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
             1
         );
 
-        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -325,7 +240,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
         $result = $this->uniqueTaskService->run($alias);
 
-        // Assert : Task should fail
         $this->assertFalse($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
@@ -335,11 +249,9 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
     public function test_task_validates_payload_before_execution(): void
     {
-        // Arrange : Freeze time and create task without body (invalid)
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
-        // Payload sans body (devrait échouer la validation)
         $payload = StrictDataObject::from([
             'notifiable_type' => TestUser::class,
             'notifiable_id' => $this->user->getKey(),
@@ -355,7 +267,6 @@ final class SendDelayedNotificationTaskTest extends TestCase
             1
         );
 
-        // Act : Register and run the task
         $alias = $this->uniqueTaskService->register(
             new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
             $payload,
@@ -364,11 +275,460 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
         $result = $this->uniqueTaskService->run($alias);
 
-        // Assert : Task should fail validation
         $this->assertFalse($result->success);
 
         $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
         $this->assertNotNull($taskModel);
         $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
+    }
+
+    // ==================== TESTS: Channels ====================
+
+    public function test_register_and_execute_with_channels(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = $this->createPayload([
+            'body' => 'Message avec canal mail',
+            'subject' => 'Test Canal',
+            'type' => 'channel_test',
+            'channels' => [MailChannel::class],
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertTrue($result->success);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+        ]);
+    }
+
+    public function test_register_and_execute_with_channel_collection(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $channels = FqcnChannelCollection::from([MailChannel::class, TestChannel::class]);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'body' => 'Message avec canaux',
+            'subject' => 'Test Canaux',
+            'type' => 'channel_collection',
+            'data' => [],
+            'channels' => $channels,
+            'limit_per_channel' => null,
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertTrue($result->success);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+        ]);
+    }
+
+    // ==================== TESTS: Destination Filters ====================
+
+    public function test_register_and_execute_with_destination_filter_single(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = $this->createPayload([
+            'body' => 'Message avec filtre mail',
+            'subject' => 'Test Filtre',
+            'type' => 'filter_test',
+            'channels' => [MailChannel::class],
+            'destination_filter' => [
+                MailChannel::class => ['john@example.com'],
+            ],
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertTrue($result->success);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'destination' => 'john@example.com',
+        ]);
+    }
+
+    public function test_register_and_execute_with_destination_filter_multiple(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = $this->createPayload([
+            'body' => 'Message avec filtres multiples',
+            'subject' => 'Test Filtres Multiples',
+            'type' => 'filter_multiple',
+            'channels' => [MailChannel::class, TestChannel::class], // ✅ TestChannel au lieu de SmsChannel
+            'destination_filter' => [
+                MailChannel::class => ['john@example.com', 'admin@example.com'], // ✅ Ajout admin
+                TestChannel::class => ['+33123456789'],
+            ],
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertTrue($result->success);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'destination' => 'john@example.com',
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'destination' => 'admin@example.com',
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'destination' => '+33123456789',
+        ]);
+    }
+
+    public function test_register_and_execute_with_destination_filter_multiple_destinations_same_channel(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $user = TestUser::create([
+            'name' => 'Multi Email User',
+            'email' => 'primary@example.com',
+            'email_secondary' => 'secondary@example.com', // ✅ Ajouté
+        ]);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $user->getKey(),
+            'body' => 'Message avec emails multiples',
+            'subject' => 'Test Emails Multiples',
+            'type' => 'filter_multiple_emails',
+            'data' => [],
+            'channels' => [MailChannel::class],
+            'limit_per_channel' => null,
+            'destination_filter' => [
+                MailChannel::class => ['primary@example.com', 'secondary@example.com'],
+            ],
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertTrue($result->success);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $user->getKey(),
+            'destination' => 'primary@example.com',
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $user->getKey(),
+            'destination' => 'secondary@example.com',
+        ]);
+    }
+
+    public function test_register_and_execute_with_destination_filter_non_matching_skips_destination(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $user = TestUser::create([
+            'name' => 'Different Email User',
+            'email' => 'different@example.com',
+            'phone' => '+33123456789',
+        ]);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $user->getKey(),
+            'body' => 'Message avec filtre non correspondant',
+            'subject' => 'Test Filtre Non Correspondant',
+            'type' => 'filter_non_matching',
+            'data' => [],
+            'channels' => [MailChannel::class],
+            'limit_per_channel' => null,
+            'destination_filter' => [
+                MailChannel::class => ['non-matching@example.com'],
+            ],
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        // ✅ La tâche échoue car aucune destination ne correspond
+        $this->assertFalse($result->success);
+
+        $this->assertDatabaseMissing('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $user->getKey(),
+        ]);
+    }
+
+    public function test_register_and_execute_with_destination_filter_and_limit_per_channel(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $user = TestUser::create([
+            'name' => 'Limit User',
+            'email' => 'limit1@example.com',
+            'email_secondary' => 'limit2@example.com', // ✅ Ajouté
+        ]);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $user->getKey(),
+            'body' => 'Message avec filtre et limite',
+            'subject' => 'Test Filtre + Limite',
+            'type' => 'filter_limit',
+            'data' => [],
+            'channels' => [MailChannel::class],
+            'limit_per_channel' => 1,
+            'destination_filter' => [
+                MailChannel::class => ['limit1@example.com', 'limit2@example.com'],
+            ],
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertTrue($result->success);
+
+        $notifications = DB::table('notifications')
+            ->where('notifiable_type', TestUser::class)
+            ->where('notifiable_id', $user->getKey())
+            ->where('channel', MailChannel::class)
+            ->get();
+
+        $this->assertCount(1, $notifications);
+    }
+
+    // ==================== TESTS: Error Cases ====================
+
+    public function test_task_validates_missing_channels(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'body' => 'Test',
+            'subject' => 'Test Subject',
+            'type' => 'test',
+            'data' => [],
+            'channels' => [], // ✅ Vide - devrait échouer
+            'limit_per_channel' => null,
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String()),
+            1
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        // ✅ La tâche échoue car channels est vide
+        $this->assertFalse($result->success);
+
+        $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
+        $this->assertNotNull($taskModel);
+        $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
+    }
+
+    public function test_task_validates_empty_body(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'body' => '', // ✅ Vide - devrait échouer
+            'subject' => 'Test Subject',
+            'type' => 'test',
+            'data' => [],
+            'channels' => [MailChannel::class],
+            'limit_per_channel' => null,
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String()),
+            1
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertFalse($result->success);
+
+        $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
+        $this->assertNotNull($taskModel);
+        $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
+    }
+
+    public function test_task_validates_empty_subject(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = StrictDataObject::from([
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+            'body' => 'Test message',
+            'subject' => '', // ✅ Vide - devrait échouer
+            'type' => 'test',
+            'data' => [],
+            'channels' => [MailChannel::class],
+            'limit_per_channel' => null,
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String()),
+            1
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        $this->assertFalse($result->success);
+
+        $taskModel = $this->uniqueTaskRepository->findByAlias($alias);
+        $this->assertNotNull($taskModel);
+        $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
+    }
+
+    public function test_task_handles_empty_destination_filter_gracefully(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $payload = $this->createPayload([
+            'body' => 'Test avec filtre vide',
+            'subject' => 'Test Filtre Vide',
+            'type' => 'filter_empty',
+            'channels' => [MailChannel::class],
+            'destination_filter' => [], // ✅ Filtre vide
+        ]);
+
+        $config = $this->createConfig(
+            new Iso8601DateTimeVO($frozenNow->copy()->subHours(2)->toIso8601String())
+        );
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            $payload,
+            $config
+        );
+
+        $result = $this->uniqueTaskService->run($alias);
+
+        // ✅ Filtre vide = pas de filtre, la notification est envoyée
+        $this->assertTrue($result->success);
+
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_type' => TestUser::class,
+            'notifiable_id' => $this->user->getKey(),
+        ]);
     }
 }

@@ -7,10 +7,9 @@ namespace AndyDefer\LaravelNotification\Tests\Fixtures\Models;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Channels\SmsChannel;
-use AndyDefer\LaravelNotification\Channels\WhatsAppChannel;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
+use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use Illuminate\Database\Eloquent\Model;
 
@@ -21,6 +20,7 @@ final class TestUser extends Model implements NotifiableInterface
     protected $fillable = [
         'name',
         'email',
+        'email_secondary', // ✅ AJOUTÉ
         'phone',
     ];
 
@@ -28,12 +28,32 @@ final class TestUser extends Model implements NotifiableInterface
     {
         $collection = new NotificationRouteCollection;
 
+        // ✅ Canal de test (toujours actif)
+        $collection->add(
+            new NotificationRouteVO(
+                channelClass: TestChannel::class,
+                destination: 'test_destination',
+                metadata: new StrictDataObject(['type' => 'test'])
+            )
+        );
+
         if ($this->email) {
             $collection->add(
                 new NotificationRouteVO(
                     channelClass: MailChannel::class,
                     destination: $this->email,
                     metadata: new StrictDataObject(['name' => $this->name])
+                )
+            );
+        }
+
+        // ✅ Email secondaire
+        if ($this->email_secondary) {
+            $collection->add(
+                new NotificationRouteVO(
+                    channelClass: MailChannel::class,
+                    destination: $this->email_secondary,
+                    metadata: new StrictDataObject(['name' => $this->name, 'type' => 'secondary'])
                 )
             );
         }
@@ -49,14 +69,9 @@ final class TestUser extends Model implements NotifiableInterface
         if ($this->phone) {
             $collection->add(
                 new NotificationRouteVO(
-                    channelClass: SmsChannel::class,
+                    channelClass: TestChannel::class,  // ✅ Utilise TestChannel au lieu de SmsChannel
                     destination: $this->phone,
-                )
-            );
-            $collection->add(
-                new NotificationRouteVO(
-                    channelClass: WhatsAppChannel::class,
-                    destination: $this->phone,
+                    metadata: new StrictDataObject(['type' => 'phone'])
                 )
             );
         }

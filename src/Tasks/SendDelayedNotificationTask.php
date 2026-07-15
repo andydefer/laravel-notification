@@ -12,54 +12,37 @@ use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\Task\Abstract\AbstractUniqueTask;
 use AndyDefer\Task\ValueObjects\DescriptionVO;
 use Illuminate\Contracts\Foundation\Application;
+use InvalidArgumentException;
 use RuntimeException;
 
-/**
- * Task for sending delayed notifications to notifiable entities.
- *
- * This task retrieves a notifiable model (User, etc.) and sends a notification
- * using the NotificationSenderProcessor. It is designed to be scheduled
- * for future execution.
- */
 final class SendDelayedNotificationTask extends AbstractUniqueTask
 {
-    /**
-     * Validate the payload before execution.
-     *
-     * @param  StrictDataObject  $payload  The task payload
-     *
-     * @throws \InvalidArgumentException If the payload is invalid
-     */
     protected function before(StrictDataObject $payload): void
     {
         $record = NotificationTaskPayloadRecord::from($payload);
 
         if (empty($record->notifiable_type)) {
-            throw new \InvalidArgumentException('Notifiable type is required');
+            throw new InvalidArgumentException('Notifiable type is required');
         }
 
         if (empty($record->notifiable_id)) {
-            throw new \InvalidArgumentException('Notifiable ID is required');
+            throw new InvalidArgumentException('Notifiable ID is required');
         }
 
         if (empty($record->body)) {
-            throw new \InvalidArgumentException('Notification body is required');
+            throw new InvalidArgumentException('Notification body is required');
         }
 
         if (empty($record->subject)) {
-            throw new \InvalidArgumentException('Notification subject is required');
+            throw new InvalidArgumentException('Notification subject is required');
         }
 
-        if (empty($record->channels)) {
-            throw new \InvalidArgumentException('At least one notification channel is required');
+        // ✅ Vérifier que les canaux ne sont pas vides
+        if ($record->channels->isEmpty()) {
+            throw new InvalidArgumentException('At least one notification channel is required');
         }
     }
 
-    /**
-     * Execute the main business logic.
-     *
-     * @throws RuntimeException If the notifiable entity is not found
-     */
     protected function process(): void
     {
         $payload = NotificationTaskPayloadRecord::from($this->context->getPayload());
@@ -69,7 +52,12 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
         $message = $this->createNotificationMessage($payload);
         $processRecord = $this->createProcessRecord($payload);
 
-        $this->sendNotification($notifiable, $message, $processRecord);
+        $this->sendNotification(
+            $notifiable,
+            $message,
+            $processRecord,
+            $payload->destination_filter?->toArray()
+        );
 
         $this->info(new DescriptionVO(sprintf(
             'Delayed notification sent to %s #%d',
@@ -78,12 +66,6 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
         )));
     }
 
-    /**
-     * Hook executed after the main processing.
-     *
-     * @param  bool  $success  Indicates whether the task completed successfully
-     * @param  DescriptionVO|null  $error  Error description when task failed
-     */
     protected function after(bool $success, ?DescriptionVO $error = null): void
     {
         $payload = NotificationTaskPayloadRecord::from($this->context->getPayload());
@@ -104,14 +86,6 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
         }
     }
 
-    /**
-     * Find the notifiable entity.
-     *
-     * @param  NotificationTaskPayloadRecord  $payload  The task payload
-     * @return object The notifiable entity
-     *
-     * @throws RuntimeException If the notifiable entity is not found
-     */
     private function findNotifiable(NotificationTaskPayloadRecord $payload): object
     {
         /** @var class-string $notifiableType */
@@ -129,12 +103,6 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
         return $notifiable;
     }
 
-    /**
-     * Create the notification message.
-     *
-     * @param  NotificationTaskPayloadRecord  $payload  The task payload
-     * @return NotificationMessageVO The notification message
-     */
     private function createNotificationMessage(NotificationTaskPayloadRecord $payload): NotificationMessageVO
     {
         return new NotificationMessageVO(
@@ -145,12 +113,6 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
         );
     }
 
-    /**
-     * Create the process record.
-     *
-     * @param  NotificationTaskPayloadRecord  $payload  The task payload
-     * @return ProcessNotificationRecord The process record
-     */
     private function createProcessRecord(NotificationTaskPayloadRecord $payload): ProcessNotificationRecord
     {
         return new ProcessNotificationRecord(
@@ -159,28 +121,17 @@ final class SendDelayedNotificationTask extends AbstractUniqueTask
         );
     }
 
-    /**
-     * Send the notification.
-     *
-     * @param  object  $notifiable  The notifiable entity
-     * @param  NotificationMessageVO  $message  The notification message
-     * @param  ProcessNotificationRecord  $processRecord  The process record
-     */
     private function sendNotification(
         object $notifiable,
         NotificationMessageVO $message,
-        ProcessNotificationRecord $processRecord
+        ProcessNotificationRecord $processRecord,
+        ?array $destinationFilters
     ): void {
         /** @var NotificationSenderProcessor $processor */
         $processor = $this->getApplication()->make(NotificationSenderProcessor::class);
-        $processor->send($notifiable, $message, $processRecord);
+        $processor->send($notifiable, $message, $processRecord, $destinationFilters);
     }
 
-    /**
-     * Get the Laravel application instance.
-     *
-     * @return Application The application container
-     */
     private function getApplication(): Application
     {
         return $this->context->getLaravelApp();

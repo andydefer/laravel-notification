@@ -6,12 +6,14 @@ namespace AndyDefer\LaravelNotification\Services;
 
 use AndyDefer\DomainStructures\Services\HydrationService;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
+use AndyDefer\LaravelNotification\Collections\FqcnChannelCollection;
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcessorInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
+use AndyDefer\LaravelNotification\Options\SendOptions;
 use AndyDefer\LaravelNotification\Records\NotificationTaskPayloadRecord;
 use AndyDefer\LaravelNotification\Records\ProcessNotificationRecord;
 use AndyDefer\LaravelNotification\Records\SendAtRecord;
@@ -39,24 +41,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 
-/**
- * Service for managing notification tasks.
- *
- * Handles sending notifications immediately, with delay, at specific times,
- * or on a recurring schedule using the task system.
- */
 final class NotificationService implements NotificationServiceInterface
 {
-    /**
-     * Constructor for the notification service.
-     *
-     * @param  NotificationRepositoryInterface  $notificationRepository  The notification repository
-     * @param  NotificationSenderProcessorInterface  $senderProcessor  The notification sender processor
-     * @param  UniqueTaskServiceInterface  $uniqueTaskService  The unique task service
-     * @param  RecurringTaskServiceInterface  $recurringTaskService  The recurring task service
-     * @param  LoggerInterface  $logger  The logger instance
-     * @param  HydrationService  $hydration  The hydration service
-     */
+    private ?SendOptions $pendingOptions = null;
+
     public function __construct(
         private readonly NotificationRepositoryInterface $notificationRepository,
         private readonly NotificationSenderProcessorInterface $senderProcessor,
@@ -67,26 +55,58 @@ final class NotificationService implements NotificationServiceInterface
     ) {}
 
     /**
+     * Set options for the next send operation.
+     *
+     * @param  SendOptions  $options  The send options
+     */
+    public function withOptions(SendOptions $options): self
+    {
+        $this->pendingOptions = $options;
+
+        return $this;
+    }
+
+    /**
+     * Reset the pending options.
+     */
+    public function resetOptions(): self
+    {
+        $this->pendingOptions = null;
+
+        return $this;
+    }
+
+    /**
      * {@inheritDoc}
      */
     public function sendNow(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendNowRecord $record
+        ?SendNowRecord $record = null
     ): SendResultCollection {
+        $record = $record ?? new SendNowRecord;
+        $options = $this->pendingOptions ?? new SendOptions;
+        $this->resetOptions();
+
         $processRecord = new ProcessNotificationRecord(
-            channels: $record->channels,
-            limit_per_channel: $record->limit_per_channel,
+            channels: $options->channels ?? $record->channels,
+            limit_per_channel: $options->limitPerChannel ?? $record->limit_per_channel,
         );
 
         $this->logInfo('Sending notification immediately', [
             'notifiable' => $notifiable->getMorphClass().'#'.$notifiable->getKey(),
             'message_type' => $message->getType(),
-            'channels' => $record->channels->isNotEmpty() ? $record->channels->getChannelClasses() : 'all',
-            'limit_per_channel' => $record->limit_per_channel,
+            'channels' => $processRecord->channels->isNotEmpty() ? $processRecord->channels->getChannelClasses() : 'all',
+            'limit_per_channel' => $processRecord->limit_per_channel,
+            'destination_filters' => $options->destinationFilters?->toArray(),
         ]);
 
-        return $this->senderProcessor->send($notifiable, $message, $processRecord);
+        return $this->senderProcessor->send(
+            $notifiable,
+            $message,
+            $processRecord,
+            $options->destinationFilters?->toArray()
+        );
     }
 
     /**
@@ -95,17 +115,43 @@ final class NotificationService implements NotificationServiceInterface
     public function sendLater(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendLaterRecord $record
+        ?SendLaterRecord $record = null
     ): TaskAliasVO {
+        $record = $record ?? new SendLaterRecord(delay_seconds: 60);
+
         if ($record->delay_seconds <= 0) {
             throw new InvalidArgumentException('Delay seconds must be greater than 0.');
         }
+
+        $options = $this->pendingOptions ?? new SendOptions;
+        $this->resetOptions();
+
+        $payload = $this->createTaskPayload($notifiable, $message, $record, $options);
 
         $scheduledAt = new NotificationDateTimeVO(
             Carbon::now()->addSeconds($record->delay_seconds)->toIso8601String()
         );
 
-        return $this->scheduleUniqueTask($notifiable, $message, $scheduledAt, $record);
+        $config = UniqueTaskConfigRecord::from([
+            'description' => 'Delayed notification: '.$message->getSubject(),
+            'scheduled_at' => new Iso8601DateTimeVO($scheduledAt->getValue()),
+            'max_attempts' => 3,
+            'grace_period' => 86400,
+        ]);
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            StrictDataObject::from($payload->toArray()),
+            $config
+        );
+
+        $this->logInfo('Delayed notification scheduled', [
+            'alias' => $alias->getValue(),
+            'scheduled_at' => $scheduledAt->getValue(),
+            'destination_filters' => $options->destinationFilters?->toArray(),
+        ]);
+
+        return $alias;
     }
 
     /**
@@ -114,15 +160,43 @@ final class NotificationService implements NotificationServiceInterface
     public function sendAt(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendAtRecord $record
+        ?SendAtRecord $record = null
     ): TaskAliasVO {
+        $record = $record ?? new SendAtRecord(
+            scheduled_at: new NotificationDateTimeVO(Carbon::now()->addDay()->toIso8601String())
+        );
+
         $now = new NotificationDateTimeVO(Carbon::now()->toIso8601String());
 
         if ($record->scheduled_at->isBeforeOrEqual($now)) {
             throw new InvalidArgumentException('Scheduled date must be in the future.');
         }
 
-        return $this->scheduleUniqueTask($notifiable, $message, $record->scheduled_at, $record);
+        $options = $this->pendingOptions ?? new SendOptions;
+        $this->resetOptions();
+
+        $payload = $this->createTaskPayload($notifiable, $message, $record, $options);
+
+        $config = UniqueTaskConfigRecord::from([
+            'description' => 'Scheduled notification: '.$message->getSubject(),
+            'scheduled_at' => new Iso8601DateTimeVO($record->scheduled_at->getValue()),
+            'max_attempts' => 3,
+            'grace_period' => 86400,
+        ]);
+
+        $alias = $this->uniqueTaskService->register(
+            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
+            StrictDataObject::from($payload->toArray()),
+            $config
+        );
+
+        $this->logInfo('Scheduled notification created', [
+            'alias' => $alias->getValue(),
+            'scheduled_at' => $record->scheduled_at->getValue(),
+            'destination_filters' => $options->destinationFilters?->toArray(),
+        ]);
+
+        return $alias;
     }
 
     /**
@@ -131,13 +205,21 @@ final class NotificationService implements NotificationServiceInterface
     public function sendRecurring(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        SendRecurringRecord $record
+        ?SendRecurringRecord $record = null
     ): TaskAliasVO {
+        $record = $record ?? new SendRecurringRecord(
+            interval_seconds: 86400,
+            start_at: new NotificationDateTimeVO(Carbon::now()->toIso8601String())
+        );
+
         if ($record->interval_seconds < 1) {
             throw new InvalidArgumentException('Interval seconds must be at least 1 second.');
         }
 
-        $payload = $this->createTaskPayload($notifiable, $message, $record);
+        $options = $this->pendingOptions ?? new SendOptions;
+        $this->resetOptions();
+
+        $payload = $this->createTaskPayload($notifiable, $message, $record, $options);
 
         $config = RecurringTaskConfigRecord::from([
             'description' => 'Recurring notification: '.$message->getSubject(),
@@ -158,6 +240,7 @@ final class NotificationService implements NotificationServiceInterface
             'interval_seconds' => $record->interval_seconds,
             'start_at' => $record->start_at->getValue(),
             'end_at' => $record->end_at?->getValue(),
+            'destination_filters' => $options->destinationFilters?->toArray(),
         ]);
 
         return $alias;
@@ -333,56 +416,23 @@ final class NotificationService implements NotificationServiceInterface
     }
 
     /**
-     * Schedule a unique task for notification delivery.
-     *
-     * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
-     * @param  NotificationMessageVO  $message  The notification message
-     * @param  NotificationDateTimeVO  $scheduledAt  The scheduled time
-     * @param  SendLaterRecord|SendAtRecord  $record  The schedule record
-     * @return TaskAliasVO The task alias
-     */
-    private function scheduleUniqueTask(
-        NotifiableInterface&Model $notifiable,
-        NotificationMessageVO $message,
-        NotificationDateTimeVO $scheduledAt,
-        SendLaterRecord|SendAtRecord $record
-    ): TaskAliasVO {
-        $payload = $this->createTaskPayload($notifiable, $message, $record);
-
-        $config = UniqueTaskConfigRecord::from([
-            'description' => 'Delayed notification: '.$message->getSubject(),
-            'scheduled_at' => new Iso8601DateTimeVO($scheduledAt->getValue()),
-            'max_attempts' => 3,
-            'grace_period' => 86400,
-        ]);
-
-        $alias = $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(SendDelayedNotificationTask::class),
-            StrictDataObject::from($payload->toArray()),
-            $config
-        );
-
-        $this->logInfo('Delayed notification scheduled', [
-            'alias' => $alias->getValue(),
-            'scheduled_at' => $scheduledAt->getValue(),
-        ]);
-
-        return $alias;
-    }
-
-    /**
-     * Create the task payload.
+     * Create the task payload with options.
      *
      * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
      * @param  NotificationMessageVO  $message  The notification message
      * @param  object  $record  The schedule record
+     * @param  SendOptions  $options  The send options
      * @return NotificationTaskPayloadRecord The task payload
      */
     private function createTaskPayload(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        object $record
+        object $record,
+        SendOptions $options
     ): NotificationTaskPayloadRecord {
+        $channels = $options->channels ?? $record->channels ?? new FqcnChannelCollection;
+        $limitPerChannel = $options->limitPerChannel ?? $record->limit_per_channel ?? null;
+
         return new NotificationTaskPayloadRecord(
             notifiable_type: $notifiable->getMorphClass(),
             notifiable_id: $notifiable->getKey(),
@@ -390,8 +440,9 @@ final class NotificationService implements NotificationServiceInterface
             subject: $message->getSubject(),
             type: $message->getType(),
             data: $message->getData(),
-            channels: $record->channels,
-            limit_per_channel: $record->limit_per_channel,
+            channels: $channels,
+            limit_per_channel: $limitPerChannel,
+            destination_filter: $options->destinationFilters,
         );
     }
 

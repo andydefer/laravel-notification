@@ -10,12 +10,6 @@ use AndyDefer\LaravelNotification\Records\ProcessNotificationRecord;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use Illuminate\Database\Eloquent\Model;
 
-/**
- * Interface for notification sender processors.
- *
- * Defines the contract for processing and sending notifications
- * through multiple channels with routing and error handling.
- */
 interface NotificationSenderProcessorInterface
 {
     /**
@@ -24,6 +18,7 @@ interface NotificationSenderProcessorInterface
      * @param  NotifiableInterface&Model  $notifiable  The notifiable entity
      * @param  NotificationMessageVO  $message  The notification message
      * @param  ProcessNotificationRecord  $processRecord  The processing configuration
+     * @param  array<string, array<string>>|null  $destinationFilters  Optional destination filters (channel => destinations)
      * @return SendResultCollection Collection of send results
      *
      * @throws \RuntimeException If no channels are available
@@ -31,6 +26,7 @@ interface NotificationSenderProcessorInterface
     public function send(
         NotifiableInterface&Model $notifiable,
         NotificationMessageVO $message,
-        ProcessNotificationRecord $processRecord
+        ProcessNotificationRecord $processRecord,
+        ?array $destinationFilters = null
     ): SendResultCollection;
 }
