@@ -64,7 +64,6 @@ final class NotificationServiceProvider extends ServiceProvider
             abstract: NotifiableBuilder::class,
             concrete: function ($app) {
                 return NotifiableBuilder::create(
-                    $app->make(NotificationServiceInterface::class)
                 );
             }
         );

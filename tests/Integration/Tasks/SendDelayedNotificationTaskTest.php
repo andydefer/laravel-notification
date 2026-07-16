@@ -169,7 +169,10 @@ final class SendDelayedNotificationTaskTest extends TestCase
 
         $result = $this->uniqueTaskService->run($alias);
 
-        $this->assertFalse($result->success);
+        // ✅ La tâche est "skippée" car elle est dans le futur, donc success = true
+        $this->assertTrue($result->success);
+        $this->assertTrue($result->skipped);
+        $this->assertSame('Task is scheduled in the future - skipped', $result->message);
 
         $updatedTask = $this->uniqueTaskRepository->findByAlias($alias);
         $this->assertEquals(UniqueTaskStatus::PENDING, $updatedTask->getStatus());
