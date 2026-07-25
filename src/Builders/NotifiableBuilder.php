@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Builders;
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
+use AndyDefer\LaravelNotification\Collections\FqcnChannelCollection;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
@@ -15,6 +16,7 @@ use AndyDefer\LaravelNotification\Records\SendLaterRecord;
 use AndyDefer\LaravelNotification\Records\SendNowRecord;
 use AndyDefer\LaravelNotification\Records\SendRecurringRecord;
 use AndyDefer\LaravelNotification\ValueObjects\DirectNotifiable;
+use AndyDefer\LaravelNotification\ValueObjects\FqcnChannelVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
@@ -255,7 +257,14 @@ final class NotifiableBuilder
         $notifiable = $this->buildNotifiable();
         $message = $this->buildMessage();
 
-        $record = new SendLaterRecord(delay_seconds: $delaySeconds);
+        // ✅ Récupérer les canaux depuis les routes
+        $channels = $this->getChannelsFromRoutes();
+
+        $record = new SendLaterRecord(
+            delay_seconds: $delaySeconds,
+            channels: $channels,
+            limit_per_channel: $this->options?->limitPerChannel ?? null
+        );
 
         if ($this->options !== null) {
             $this->service->withOptions($this->options);
@@ -277,7 +286,14 @@ final class NotifiableBuilder
         $notifiable = $this->buildNotifiable();
         $message = $this->buildMessage();
 
-        $record = new SendAtRecord(scheduled_at: $scheduledAt);
+        // ✅ Récupérer les canaux depuis les routes
+        $channels = $this->getChannelsFromRoutes();
+
+        $record = new SendAtRecord(
+            scheduled_at: $scheduledAt,
+            channels: $channels,
+            limit_per_channel: $this->options?->limitPerChannel ?? null
+        );
 
         if ($this->options !== null) {
             $this->service->withOptions($this->options);
@@ -302,10 +318,15 @@ final class NotifiableBuilder
         $notifiable = $this->buildNotifiable();
         $message = $this->buildMessage();
 
+        // ✅ Récupérer les canaux depuis les routes
+        $channels = $this->getChannelsFromRoutes();
+
         $record = new SendRecurringRecord(
             interval_seconds: $intervalSeconds,
             start_at: $startAt,
             end_at: $endAt,
+            channels: $channels,
+            limit_per_channel: $this->options?->limitPerChannel ?? null
         );
 
         if ($this->options !== null) {
@@ -368,5 +389,24 @@ final class NotifiableBuilder
             type: $this->type,
             data: $this->data,
         );
+    }
+
+    /**
+     * Extract channels from routes.
+     */
+    private function getChannelsFromRoutes(): FqcnChannelCollection
+    {
+        $channels = new FqcnChannelCollection;
+
+        foreach ($this->routes as $route) {
+            $channelClass = $route->getChannelClass();
+
+            // ✅ Éviter les doublons
+            if (! $channels->hasChannel($channelClass)) {
+                $channels->add(new FqcnChannelVO($channelClass));
+            }
+        }
+
+        return $channels;
     }
 }
