@@ -541,7 +541,7 @@ final class NotificationServiceTest extends TestCase
         $task = $this->uniqueTaskRepository->findByAlias($alias);
         $this->assertNotNull($task);
         $this->assertEquals(
-            $frozenNow->copy()->addHours(2)->toIso8601String(),
+            $frozenNow->copy()->addHours(2)->format('Y-m-d H:i:s'),
             $task->getScheduledAt()->getValue()
         );
     }

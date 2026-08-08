@@ -101,8 +101,6 @@ final class NotifiableBuilderTest extends TestCase
         return $property->getValue($builder);
     }
 
-    // ==================== TESTS: Basic Creation ====================
-
     public function test_create_builder(): void
     {
         $builder = NotifiableBuilder::create();
@@ -116,8 +114,6 @@ final class NotifiableBuilderTest extends TestCase
 
         $this->assertInstanceOf(NotifiableBuilder::class, $builder);
     }
-
-    // ==================== TESTS: Channel Configuration ====================
 
     public function test_to_sets_destination_for_channel(): void
     {
@@ -179,13 +175,10 @@ final class NotifiableBuilderTest extends TestCase
         $notifiable = $this->getNotifiableFromBuilder($builder);
         $routes = $notifiable->getNotificationChannels();
 
-        // ✅ Devrait avoir 1 destination (overwrite)
         $this->assertCount(1, $routes);
         $this->assertTrue($routes->hasDestination('new@example.com'));
         $this->assertFalse($routes->hasDestination('old@example.com'));
     }
-
-    // ==================== TESTS: Message Configuration ====================
 
     public function test_body_sets_message_body(): void
     {
@@ -271,8 +264,6 @@ final class NotifiableBuilderTest extends TestCase
             ->sendNow();
     }
 
-    // ==================== TESTS: Options Configuration ====================
-
     public function test_limit_sets_limit_per_channel(): void
     {
         $builder = NotifiableBuilder::create()
@@ -347,8 +338,6 @@ final class NotifiableBuilderTest extends TestCase
         $this->assertArrayHasKey(MailChannel::class, $filters);
     }
 
-    // ==================== TESTS: Metadata Configuration ====================
-
     public function test_metadata_sets_metadata_for_channel(): void
     {
         $metadata = new StrictDataObject([
@@ -394,8 +383,6 @@ final class NotifiableBuilderTest extends TestCase
         }
     }
 
-    // ==================== TESTS: Tracing Configuration ====================
-
     public function test_as_sets_morph_class_and_key(): void
     {
         $builder = NotifiableBuilder::create()
@@ -410,11 +397,8 @@ final class NotifiableBuilderTest extends TestCase
         $this->assertEquals(12345, $notifiable->getKey());
     }
 
-    // ==================== TESTS: Send Methods ====================
-
     public function test_send_now_sends_notification(): void
     {
-        // ✅ Utiliser TestChannel (toujours disponible)
         $results = NotifiableBuilder::create()
             ->to(TestChannel::class, 'test_destination')
             ->subject('Test Subject')
@@ -455,9 +439,11 @@ final class NotifiableBuilderTest extends TestCase
 
         $task = app(UniqueTaskRepository::class)->findByAlias($alias);
         $this->assertNotNull($task);
+
+        // ✅ Utiliser toIso8601String() au lieu de getValue()
         $this->assertEquals(
             $frozenNow->copy()->addSeconds(300)->toIso8601String(),
-            $task->getScheduledAt()->getValue()
+            $task->getScheduledAt()->toIso8601()
         );
     }
 
@@ -474,9 +460,11 @@ final class NotifiableBuilderTest extends TestCase
 
         $task = app(UniqueTaskRepository::class)->findByAlias($alias);
         $this->assertNotNull($task);
+
+        // ✅ Utiliser toIso8601String() au lieu de getValue()
         $this->assertEquals(
             $frozenNow->copy()->addSeconds(600)->toIso8601String(),
-            $task->getScheduledAt()->getValue()
+            $task->getScheduledAt()->toIso8601()
         );
     }
 
@@ -495,9 +483,11 @@ final class NotifiableBuilderTest extends TestCase
 
         $task = app(UniqueTaskRepository::class)->findByAlias($alias);
         $this->assertNotNull($task);
+
+        // ✅ Utiliser toIso8601String() au lieu de getValue()
         $this->assertEquals(
-            $scheduledAt->getValue(),
-            $task->getScheduledAt()->getValue()
+            $scheduledAt->forDatabase(),
+            $task->getScheduledAt()->forDatabase()
         );
     }
 
@@ -535,10 +525,12 @@ final class NotifiableBuilderTest extends TestCase
 
         $task = app(RecurringTaskRepository::class)->findByAlias($alias);
         $this->assertNotNull($task);
-        $this->assertEquals($endAt->getValue(), $task->getEndAt()?->getValue());
-    }
 
-    // ==================== TESTS: Send with Options ====================
+        $this->assertEquals(
+            $endAt->forDatabase(),
+            $task->getEndAt()->forDatabase()
+        );
+    }
 
     public function test_send_now_with_limit(): void
     {
@@ -600,13 +592,13 @@ final class NotifiableBuilderTest extends TestCase
 
         $task = app(UniqueTaskRepository::class)->findByAlias($alias);
         $this->assertNotNull($task);
+
+        // ✅ Utiliser toIso8601String() au lieu de getValue()
         $this->assertEquals(
-            $frozenNow->copy()->addSeconds(300)->toIso8601String(),
-            $task->getScheduledAt()->getValue()
+            $frozenNow->copy()->addSeconds(300)->format('Y-m-d H:i:s'),
+            $task->getScheduledAt()->forDatabase()
         );
     }
-
-    // ==================== TESTS: Reset ====================
 
     public function test_reset_clears_builder_state(): void
     {
@@ -645,12 +637,9 @@ final class NotifiableBuilderTest extends TestCase
 
         $builder->sendNow();
 
-        // ✅ Options should be auto-reset after send
         $options = $this->getOptionsFromBuilder($builder);
         $this->assertNull($options);
     }
-
-    // ==================== TESTS: Edge Cases ====================
 
     public function test_to_with_empty_destination_throws_exception(): void
     {
