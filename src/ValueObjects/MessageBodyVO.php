@@ -7,7 +7,7 @@ namespace AndyDefer\LaravelNotification\ValueObjects;
 use AndyDefer\DomainStructures\Abstracts\AbstractValueObject;
 use InvalidArgumentException;
 
-final class MessageBodyVO extends AbstractValueObject
+class MessageBodyVO extends AbstractValueObject
 {
     public readonly string $value;
 
@@ -24,6 +24,7 @@ final class MessageBodyVO extends AbstractValueObject
 
     public function getValue(): string
     {
+
         return $this->value;
     }
 

@@ -1,8 +1,14 @@
-# NotifiableBuilder - Référence Technique
+## **NotifiableBuilder - Référence Technique**
+
+---
 
 ## Description
 
 `NotifiableBuilder` est un **builder fluide** qui permet de construire et d'envoyer des notifications de manière programmatique sans avoir à implémenter l'interface `NotifiableInterface`. Il offre une API générique pour définir des canaux, destinations et messages, puis les envoyer immédiatement ou les planifier.
+
+**Support des vues Laravel :** La méthode `body()` accepte désormais `MessageViewBodyVO` en plus des chaînes de caractères, permettant d'utiliser des vues Blade pour le contenu des notifications.
+
+---
 
 ## Hiérarchie / Implémentations
 
@@ -20,6 +26,8 @@ Ce builder agit comme un **constructeur fluide** pour les notifications :
 3. **Configuration avancée** - `limit()`, `filter()`, `filters()`, `options()`, `metadata()`
 4. **Traçabilité** - `as()` pour définir la classe morph et la clé
 5. **Envoi** - `sendNow()`, `sendLater()`, `sendAt()`, `sendRecurring()`
+
+---
 
 ## API / Méthodes publiques
 
@@ -74,19 +82,29 @@ $builder->to(SmsChannel::class, ['+33123456789', '+33987654321']);
 
 ---
 
-### `body(string $body): self`
+### `body(string|MessageBodyVO $body): self`
 
 Définit le corps du message.
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
-| `$body` | `string` | Corps du message (HTML ou texte) |
+| `$body` | `string|MessageBodyVO` | Corps du message (HTML, texte ou MessageBodyVO) |
 
 **Retourne :** `self` - Instance du builder (fluent)
 
-**Exemple :**
+**Exemple avec string :**
 ```php
 $builder->body('<h1>Bienvenue !</h1><p>Contenu du message.</p>');
+```
+
+**Exemple avec MessageViewBodyVO (vue Laravel) :**
+```php
+$viewBody = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => ['user' => $user],
+]);
+
+$builder->body($viewBody);
 ```
 
 ---
@@ -373,6 +391,8 @@ Réinitialise le builder.
 $builder->reset();
 ```
 
+---
+
 ## Cas d'utilisation
 
 ### Cas 1 : Envoi d'email simple
@@ -471,6 +491,45 @@ $results = NotifiableBuilder::create()
     ->sendNow();
 ```
 
+### Cas 7 : Envoi avec vue Laravel (MessageViewBodyVO)
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
+
+$viewBody = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => ['user' => $user, 'name' => $user->name],
+]);
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Bienvenue')
+    ->body($viewBody)
+    ->sendNow();
+```
+
+### Cas 8 : Envoi avec vue en texte brut (SMS)
+
+```php
+<?php
+
+$smsBody = MessageViewBodyVO::from([
+    'view' => 'sms.welcome',
+    'data' => ['name' => $user->name],
+    'plainText' => true,
+]);
+
+$results = NotifiableBuilder::create()
+    ->to(SmsChannel::class, '+33123456789')
+    ->subject('Bienvenue')
+    ->body($smsBody)
+    ->sendNow();
+```
+
+---
+
 ## Flux d'exécution
 
 ```
@@ -478,7 +537,7 @@ NotifiableBuilder::create()
     │
     ├── to(MailChannel::class, 'user@example.com')
     ├── subject('Bienvenue')
-    ├── body('Contenu')
+    ├── body($viewBody) // ✅ Accepte string ou MessageBodyVO
     ├── limit(1)
     │
     └── sendNow()
@@ -488,6 +547,7 @@ NotifiableBuilder::create()
             │
             ├── buildMessage()
             │   └── NotificationMessageVO
+            │       └── body = $viewBody (MessageViewBodyVO)
             │
             ├── Appliquer les options (si présentes)
             │
@@ -495,6 +555,8 @@ NotifiableBuilder::create()
                     │
                     └── SendResultCollection
 ```
+
+---
 
 ## Gestion des erreurs
 
@@ -504,6 +566,8 @@ NotifiableBuilder::create()
 | Sujet manquant | `RuntimeException` | `Message subject is required. Call subject() first.` |
 | Destination vide | `InvalidArgumentException` | `Destination cannot be empty.` |
 | Aucun canal disponible | `RuntimeException` | `No available channels for notifiable {type}#{id}` |
+
+---
 
 ## Intégration
 
@@ -538,6 +602,8 @@ NotifiableBuilder
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
 ## Performance
 
 | Opération | Complexité | Description |
@@ -548,6 +614,8 @@ NotifiableBuilder
 | `sendNow()` | O(n) | n = nombre de routes |
 | `sendLater()` | O(1) | Création d'une tâche |
 | `sendRecurring()` | O(1) | Création d'une tâche récurrente |
+
+---
 
 ## Compatibilité
 
@@ -560,6 +628,8 @@ NotifiableBuilder
 | Laravel 14.x | ✅ Complet |
 | Laravel 15.x | ✅ Complet |
 
+---
+
 ## Exemple complet
 
 ```php
@@ -570,17 +640,24 @@ declare(strict_types=1);
 use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 
 class NotificationController extends Controller
 {
     public function sendWelcome(User $user): JsonResponse
     {
+        // ✅ Avec vue Laravel
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'emails.welcome',
+            'data' => ['user' => $user],
+        ]);
+
         $results = NotifiableBuilder::create()
             ->to(MailChannel::class, $user->email)
             ->to(SmsChannel::class, $user->phone)
             ->subject('Bienvenue !')
-            ->body('<h1>Bonjour</h1><p>Bienvenue sur notre plateforme.</p>')
+            ->body($viewBody)
             ->data(['user_id' => $user->id])
             ->limit(1)
             ->sendNow();
@@ -594,13 +671,19 @@ class NotificationController extends Controller
 
     public function scheduleReminder(User $user, Appointment $appointment): JsonResponse
     {
+        // ✅ Avec vue Laravel
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'emails.reminder',
+            'data' => ['appointment' => $appointment],
+        ]);
+
         $scheduledAt = $appointment->start_at->subDay();
 
         $alias = NotifiableBuilder::create()
             ->to(MailChannel::class, $user->email)
             ->to(SmsChannel::class, $user->phone)
             ->subject('Rappel de rendez-vous')
-            ->body('Votre rendez-vous est dans 24h.')
+            ->body($viewBody)
             ->sendAt(new NotificationDateTimeVO($scheduledAt->toIso8601String()));
 
         return response()->json([
@@ -611,10 +694,16 @@ class NotificationController extends Controller
 
     public function sendNewsletter(User $user): JsonResponse
     {
+        // ✅ Avec vue Laravel
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'emails.newsletter',
+            'data' => ['user' => $user, 'articles' => $this->getArticles()],
+        ]);
+
         $alias = NotifiableBuilder::create()
             ->to(MailChannel::class, $user->email)
             ->subject('Newsletter hebdomadaire')
-            ->body('Voici les dernières actualités...')
+            ->body($viewBody)
             ->limit(1)
             ->sendRecurring(
                 604800,
@@ -645,6 +734,12 @@ class NotificationController extends Controller
 
     public function sendBulkNewsletter(): JsonResponse
     {
+        // ✅ Avec vue Laravel
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'emails.newsletter',
+            'data' => ['articles' => $this->getArticles()],
+        ]);
+
         $results = NotifiableBuilder::create()
             ->to(MailChannel::class, [
                 'user1@example.com',
@@ -652,7 +747,7 @@ class NotificationController extends Controller
                 'user3@example.com',
             ])
             ->subject('Newsletter du mois')
-            ->body('Contenu de la newsletter...')
+            ->body($viewBody)
             ->limit(3)
             ->sendNow();
 
@@ -674,11 +769,14 @@ class NotificationController extends Controller
 }
 ```
 
+---
+
 ## Voir aussi
 - `DirectNotifiable` - Notifiable dynamique utilisé en interne
 - `SendOptions` - Options d'envoi
 - `NotificationService` - Service principal
 - `NotificationMessageVO` - Value Object du message
+- `MessageViewBodyVO` - Corps de message basé sur une vue
 - `SendNowRecord` - Record d'envoi immédiat
 - `SendLaterRecord` - Record d'envoi différé
 - `SendAtRecord` - Record d'envoi planifié

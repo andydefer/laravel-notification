@@ -21,13 +21,14 @@
    - [Envoi récurrent](#envoi-récurrent)
 6. [Filtrage des destinations avec SendOptions](#filtrage-des-destinations-avec-sendoptions)
 7. [NotifiableBuilder - Envoi sans entité](#notifiablebuilder---envoi-sans-entité)
-8. [Gestion des tâches](#gestion-des-tâches)
-9. [Statistiques et rapports](#statistiques-et-rapports)
-10. [Canaux disponibles](#canaux-disponibles)
-11. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
-12. [Cas d'usage concrets](#cas-dusage-concrets)
-13. [Bonnes pratiques](#bonnes-pratiques)
-14. [Référence de l'API](#référence-de-lapi)
+8. [MessageViewBodyVO - Corps de message basé sur une vue Laravel](#messageviewbodyvo---corps-de-message-basé-sur-une-vue-laravel)
+9. [Gestion des tâches](#gestion-des-tâches)
+10. [Statistiques et rapports](#statistiques-et-rapports)
+11. [Canaux disponibles](#canaux-disponibles)
+12. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
+13. [Cas d'usage concrets](#cas-dusage-concrets)
+14. [Bonnes pratiques](#bonnes-pratiques)
+15. [Référence de l'API](#référence-de-lapi)
 
 ---
 
@@ -67,6 +68,7 @@ php artisan vendor:publish --tag=notification-config
 | Gestion des tâches (pause/reprise) | ❌ | ✅ |
 | Architecture extensible | ⚠️ (complexe) | ✅ (simple) |
 | Envoi sans entité Notifiable | ❌ | ✅ (NotifiableBuilder) |
+| Corps de message basé sur vue Laravel | ❌ | ✅ (MessageViewBodyVO) |
 
 ### En une phrase
 
@@ -107,6 +109,7 @@ L'architecture du package repose sur plusieurs composants clés :
 | `AbstractChannel` | Classe de base pour les canaux de notification |
 | `SendDelayedNotificationTask` | Tâche unique pour les envois différés/planifiés |
 | `SendRecurringNotificationTask` | Tâche récurrente pour les envois périodiques |
+| `MessageViewBodyVO` | Value Object pour corps de message basé sur vue Laravel |
 
 ---
 
@@ -624,6 +627,168 @@ $results = NotifiableBuilder::create()
 | `sendAt(NotificationDateTimeVO $scheduledAt): TaskAliasVO` | Envoi planifié | `TaskAliasVO` |
 | `sendRecurring(int $intervalSeconds, NotificationDateTimeVO $startAt, ?NotificationDateTimeVO $endAt): TaskAliasVO` | Envoi récurrent | `TaskAliasVO` |
 | `reset(): self` | Réinitialise le builder | `self` |
+
+---
+
+## MessageViewBodyVO - Corps de message basé sur une vue Laravel
+
+`MessageViewBodyVO` étend `MessageBodyVO` et permet de définir le corps d'un message à partir d'une vue Laravel. Le rendu est automatique et peut être en HTML (pour les emails) ou en texte brut (pour les SMS).
+
+### Constructeur
+
+```php
+public function __construct(
+    string $view,
+    StrictAssociative|array $data = [],
+    StrictAssociative|array $mergeData = [],
+    bool $plainText = false,
+)
+```
+
+| Paramètre | Type | Description |
+|-----------|------|-------------|
+| `$view` | `string` | Nom de la vue (ex: `emails.welcome`) |
+| `$data` | `StrictAssociative|array` | Données passées à la vue |
+| `$mergeData` | `StrictAssociative|array` | Données fusionnées avec la vue |
+| `$plainText` | `bool` | `true` pour texte brut (SMS), `false` pour HTML (email) |
+
+### Méthodes
+
+| Méthode | Description |
+|---------|-------------|
+| `from(array $data): self` | Hydratation depuis un tableau |
+| `html(string $view, array $data = [], array $mergeData = []): self` | Helper pour création HTML |
+| `plain(string $view, array $data = [], array $mergeData = []): self` | Helper pour création Plain Text |
+| `asHtml(): self` | Convertit en HTML (immuable) |
+| `asPlainText(): self` | Convertit en Plain Text (immuable) |
+| `isPlainText(): bool` | Vérifie si le mode est Plain Text |
+| `getView(): string` | Récupère le nom de la vue |
+| `getData(): StrictAssociative` | Récupère les données |
+| `getMergeData(): StrictAssociative` | Récupère les données fusionnées |
+| `withData(array|StrictAssociative $data): self` | Ajoute des données (immuable) |
+| `withMergeData(array|StrictAssociative $mergeData): self` | Ajoute des données fusionnées (immuable) |
+
+### Création HTML (Email)
+
+```php
+// ✅ Via from()
+$body = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => ['user' => $user],
+]);
+
+// ✅ Via helper html()
+$body = MessageViewBodyVO::html(
+    view: 'emails.welcome',
+    data: ['user' => $user]
+);
+
+// ✅ Via constructeur
+$body = new MessageViewBodyVO(
+    view: 'emails.welcome',
+    data: ['user' => $user],
+);
+```
+
+### Création Plain Text (SMS)
+
+```php
+// ✅ Via from() avec plainText: true
+$body = MessageViewBodyVO::from([
+    'view' => 'sms.welcome',
+    'data' => ['name' => $user->name],
+    'plainText' => true,
+]);
+
+// ✅ Via helper plain()
+$body = MessageViewBodyVO::plain(
+    view: 'sms.welcome',
+    data: ['name' => $user->name]
+);
+
+// ✅ Via constructeur
+$body = new MessageViewBodyVO(
+    view: 'sms.welcome',
+    data: ['name' => $user->name],
+    plainText: true,
+);
+```
+
+### Conversion (immuable)
+
+```php
+$htmlBody = MessageViewBodyVO::html(
+    view: 'notifications.reminder',
+    data: ['user' => $user]
+);
+
+// ✅ Convertir en SMS (même vue, mode plainText)
+$smsBody = $htmlBody->asPlainText();
+
+// ✅ Ajouter des données (immuable)
+$finalBody = $htmlBody->withData(['extra' => 'value']);
+```
+
+### Exemple d'utilisation dans NotificationMessageVO
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
+use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
+
+// ✅ Corps du message basé sur une vue
+$viewBody = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => [
+        'user' => $user,
+        'name' => $user->name,
+        'email' => $user->email,
+    ],
+]);
+
+$message = new NotificationMessageVO(
+    body: $viewBody,  // ✅ MessageViewBodyVO est un MessageBodyVO
+    subject: new MessageSubjectVO('Bienvenue sur notre plateforme'),
+);
+
+$results = $service->sendNow($user, $message);
+```
+
+### Exemple avec NotifiableBuilder
+
+```php
+<?php
+
+$viewBody = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => ['user' => $user, 'name' => $user->name],
+]);
+
+$results = NotifiableBuilder::create()
+    ->to(MailChannel::class, 'user@example.com')
+    ->subject('Bienvenue')
+    ->body($viewBody)  // ✅ Accepte MessageViewBodyVO
+    ->sendNow();
+```
+
+### Exemple avec SMS en texte brut
+
+```php
+<?php
+
+$smsBody = MessageViewBodyVO::from([
+    'view' => 'sms.welcome',
+    'data' => ['name' => $user->name],
+    'plainText' => true,
+]);
+
+$results = NotifiableBuilder::create()
+    ->to(SmsChannel::class, '+33123456789')
+    ->subject('Bienvenue')
+    ->body($smsBody)
+    ->sendNow();
+```
 
 ---
 
@@ -1538,3 +1703,4 @@ $service->sendNow($user, $message);
 ## Licence
 
 MIT © [Andy Defer](https://github.com/andydefer)
+---

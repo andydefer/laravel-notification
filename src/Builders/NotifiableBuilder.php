@@ -19,6 +19,7 @@ use AndyDefer\LaravelNotification\ValueObjects\DirectNotifiable;
 use AndyDefer\LaravelNotification\ValueObjects\FqcnChannelVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
@@ -90,10 +91,16 @@ final class NotifiableBuilder
 
     /**
      * Set the message body.
+     *
+     * @param  string|MessageBodyVO|MessageViewBodyVO  $body
      */
-    public function body(string $body): self
+    public function body(string|MessageBodyVO $body): self
     {
-        $this->body = new MessageBodyVO($body);
+        if ($body instanceof MessageBodyVO) {
+            $this->body = $body;
+        } else {
+            $this->body = new MessageBodyVO($body);
+        }
 
         return $this;
     }

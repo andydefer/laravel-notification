@@ -1,8 +1,14 @@
-# NotificationService - Référence Technique
+## **NotificationService - Référence Technique**
+
+---
 
 ## Description
 
 `NotificationService` est le service principal du package Laravel Notification. Il orchestre l'envoi de notifications immédiates, différées, planifiées ou récurrentes, en utilisant le système de tâches pour les envois asynchrones.
+
+**Support des vues Laravel :** Le service accepte `MessageViewBodyVO` comme corps de message, permettant d'utiliser des vues Blade pour le contenu des notifications.
+
+---
 
 ## Hiérarchie / Implémentations
 
@@ -13,6 +19,8 @@ NotificationService (final)
 
 **Interfaces implémentées :**
 - `NotificationServiceInterface` - Contrat définissant toutes les opérations de notification
+
+---
 
 ## Rôle principal
 
@@ -25,6 +33,8 @@ Ce service agit comme le point d'entrée unique pour toutes les opérations de n
 5. **Gestion des tâches** - `cancel()`, `pause()`, `resume()`, `changeInterval()`
 6. **Statistiques** - `getStats()`, `getSessionStats()`
 7. **Configuration fluide** - `withOptions()` pour définir des options temporaires
+
+---
 
 ## API / Méthodes publiques
 
@@ -76,7 +86,7 @@ Envoie une notification immédiatement (mode synchrone).
 - `RuntimeException` si aucun canal disponible
 - `RuntimeException` si les filtres ne correspondent à aucune destination
 
-**Exemple :**
+**Exemple avec MessageBodyVO :**
 ```php
 <?php
 
@@ -97,6 +107,26 @@ $results = $service->sendNow($user, $message, $record);
 
 echo "✅ Envoyé : " . $results->getSuccessCount() . "\n";
 echo "❌ Échecs : " . $results->getFailureCount() . "\n";
+```
+
+**Exemple avec MessageViewBodyVO (vue Laravel) :**
+```php
+<?php
+
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
+use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
+
+$viewBody = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => ['user' => $user, 'name' => $user->name],
+]);
+
+$message = new NotificationMessageVO(
+    body: $viewBody,
+    subject: new MessageSubjectVO('Bienvenue'),
+);
+
+$results = $service->sendNow($user, $message, $record);
 ```
 
 ---
@@ -334,6 +364,90 @@ echo "   Échouées : " . $stats->failed . "\n";
 echo "   En attente : " . $stats->pending . "\n";
 ```
 
+---
+
+## MessageViewBodyVO - Corps de message basé sur une vue
+
+### Description
+
+`MessageViewBodyVO` étend `MessageBodyVO` et permet de définir le corps d'un message à partir d'une vue Laravel. Le rendu est automatique et peut être en HTML (pour les emails) ou en texte brut (pour les SMS).
+
+### Constructeur
+
+```php
+public function __construct(
+    string $view,
+    StrictAssociative|array $data = [],
+    StrictAssociative|array $mergeData = [],
+    bool $plainText = false,
+)
+```
+
+| Paramètre | Type | Description |
+|-----------|------|-------------|
+| `$view` | `string` | Nom de la vue (ex: `emails.welcome`) |
+| `$data` | `StrictAssociative|array` | Données passées à la vue |
+| `$mergeData` | `StrictAssociative|array` | Données fusionnées avec la vue |
+| `$plainText` | `bool` | `true` pour texte brut (SMS), `false` pour HTML (email) |
+
+### Méthodes
+
+| Méthode | Description |
+|---------|-------------|
+| `from(array $data): self` | Hydratation depuis un tableau |
+| `html(string $view, array $data = [], array $mergeData = []): self` | Helper pour création HTML |
+| `plain(string $view, array $data = [], array $mergeData = []): self` | Helper pour création Plain Text |
+| `asHtml(): self` | Convertit en HTML (immuable) |
+| `asPlainText(): self` | Convertit en Plain Text (immuable) |
+| `isPlainText(): bool` | Vérifie si le mode est Plain Text |
+| `getView(): string` | Récupère le nom de la vue |
+| `getData(): StrictAssociative` | Récupère les données |
+| `getMergeData(): StrictAssociative` | Récupère les données fusionnées |
+| `withData(array|StrictAssociative $data): self` | Ajoute des données (immuable) |
+| `withMergeData(array|StrictAssociative $mergeData): self` | Ajoute des données fusionnées (immuable) |
+
+### Exemples
+
+**Création HTML (Email) :**
+```php
+$body = MessageViewBodyVO::from([
+    'view' => 'emails.welcome',
+    'data' => ['user' => $user],
+]);
+
+$body = MessageViewBodyVO::html(
+    view: 'emails.welcome',
+    data: ['user' => $user]
+);
+```
+
+**Création Plain Text (SMS) :**
+```php
+$body = MessageViewBodyVO::from([
+    'view' => 'sms.welcome',
+    'data' => ['name' => $user->name],
+    'plainText' => true,
+]);
+
+$body = MessageViewBodyVO::plain(
+    view: 'sms.welcome',
+    data: ['name' => $user->name]
+);
+```
+
+**Conversion (immuable) :**
+```php
+$htmlBody = MessageViewBodyVO::html(
+    view: 'notifications.reminder',
+    data: ['user' => $user]
+);
+
+$smsBody = $htmlBody->asPlainText();
+$finalBody = $htmlBody->withData(['extra' => 'value']);
+```
+
+---
+
 ## Cas d'utilisation
 
 ### Cas 1 : Envoi de bienvenue avec options fluentes
@@ -373,13 +487,46 @@ class UserController extends Controller
 }
 ```
 
-### Cas 2 : Rappel différé avec gestion de tâche
+### Cas 2 : Envoi de bienvenue avec vue Laravel
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
+
+class UserController extends Controller
+{
+    public function register(Request $request)
+    {
+        $user = User::create($request->validated());
+
+        $body = MessageViewBodyVO::from([
+            'view' => 'emails.welcome',
+            'data' => [
+                'user' => $user,
+                'name' => $user->name,
+                'email' => $user->email,
+            ],
+        ]);
+
+        $message = new NotificationMessageVO(
+            body: $body,
+            subject: new MessageSubjectVO('Bienvenue sur notre plateforme'),
+        );
+
+        $results = $this->service->sendNow($user, $message);
+
+        return response()->json(['message' => 'Email de bienvenue envoyé']);
+    }
+}
+```
+
+### Cas 3 : Rappel différé avec gestion de tâche
 
 ```php
 <?php
 
 use AndyDefer\LaravelNotification\Records\SendLaterRecord;
-use AndyDefer\LaravelNotification\Records\SendNowRecord;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
 
@@ -398,13 +545,12 @@ class AppointmentController extends Controller
             ->withDestinationFilter(SmsChannel::class, $appointment->user->phone)
             ->withLimitPerChannel(1);
 
-        $record = new SendLaterRecord(delay_seconds: 86400); // 24h
+        $record = new SendLaterRecord(delay_seconds: 86400);
 
         $alias = $this->service
             ->withOptions($options)
             ->sendLater($appointment->user, $message, $record);
 
-        // ✅ Stocker l'alias pour annulation si le rendez-vous est annulé
         $appointment->notification_task = $alias->getValue();
         $appointment->save();
 
@@ -416,7 +562,6 @@ class AppointmentController extends Controller
 
     public function cancelAppointment(Appointment $appointment)
     {
-        // ✅ Annuler la notification
         if ($appointment->notification_task) {
             $this->service->cancel($appointment->notification_task);
         }
@@ -428,7 +573,7 @@ class AppointmentController extends Controller
 }
 ```
 
-### Cas 3 : Newsletter récurrente avec gestion
+### Cas 4 : Newsletter récurrente avec gestion
 
 ```php
 <?php
@@ -451,7 +596,7 @@ class NewsletterController extends Controller
             ->withDestinationFilter(MailChannel::class, $user->email);
 
         $record = new SendRecurringRecord(
-            interval_seconds: 604800, // 7 jours
+            interval_seconds: 604800,
             start_at: new NotificationDateTimeVO(now()->startOfWeek()->toIso8601String()),
             end_at: new NotificationDateTimeVO(now()->addWeeks(4)->toIso8601String()),
         );
@@ -482,7 +627,45 @@ class NewsletterController extends Controller
 }
 ```
 
-### Cas 4 : Monitoring des notifications
+### Cas 5 : Newsletter récurrente avec vue Laravel
+
+```php
+<?php
+
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
+
+class NewsletterController extends Controller
+{
+    public function subscribe(User $user)
+    {
+        $body = MessageViewBodyVO::from([
+            'view' => 'emails.newsletter',
+            'data' => [
+                'user' => $user,
+                'newsletter_date' => now()->toIso8601String(),
+                'articles' => $this->getArticles(),
+            ],
+        ]);
+
+        $message = new NotificationMessageVO(
+            body: $body,
+            subject: new MessageSubjectVO('Newsletter #' . now()->weekOfYear),
+        );
+
+        $record = new SendRecurringRecord(
+            interval_seconds: 604800,
+            start_at: new NotificationDateTimeVO(now()->startOfWeek()->toIso8601String()),
+            end_at: new NotificationDateTimeVO(now()->addWeeks(4)->toIso8601String()),
+        );
+
+        $alias = $this->service->sendRecurring($user, $message, $record);
+
+        return response()->json(['message' => 'Newsletter activée']);
+    }
+}
+```
+
+### Cas 6 : Monitoring des notifications
 
 ```php
 <?php
@@ -519,6 +702,8 @@ class AdminController extends Controller
 }
 ```
 
+---
+
 ## Flux d'exécution
 
 ```
@@ -549,6 +734,8 @@ sendNow($notifiable, $message, $record)
             └── Retourne SendResultCollection
 ```
 
+---
+
 ## Gestion des erreurs
 
 | Situation | Exception | Message |
@@ -559,6 +746,9 @@ sendNow($notifiable, $message, $record)
 | `changeInterval` avec interval < 1 | `InvalidArgumentException` | `Interval seconds must be at least 1 second.` |
 | Aucun canal disponible | `RuntimeException` | `No available channels for notifiable {type}#{id}` |
 | Filtre sans correspondance | `RuntimeException` | `No routes after applying destination filters...` |
+| Vue inexistante | `InvalidArgumentException` | `No hint path defined for [view].` |
+
+---
 
 ## Performance
 
@@ -573,6 +763,8 @@ sendNow($notifiable, $message, $record)
 | `getStats()` | O(1) | Requêtes COUNT |
 | `getSessionStats()` | O(1) | Requêtes COUNT |
 
+---
+
 ## Compatibilité
 
 | Version | Support |
@@ -584,6 +776,8 @@ sendNow($notifiable, $message, $record)
 | Laravel 14.x | ✅ Complet |
 | Laravel 15.x | ✅ Complet |
 
+---
+
 ## Exemple complet
 
 ```php
@@ -594,12 +788,11 @@ declare(strict_types=1);
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
 use AndyDefer\LaravelNotification\Options\SendOptions;
-use AndyDefer\LaravelNotification\Records\SendNowRecord;
 use AndyDefer\LaravelNotification\Records\SendLaterRecord;
 use AndyDefer\LaravelNotification\Records\SendRecurringRecord;
 use AndyDefer\LaravelNotification\Services\NotificationService;
-use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 
@@ -613,21 +806,26 @@ class OrderService
     {
         $user = $order->user;
 
-        // 1. ✅ Confirmation immédiate
         $this->sendConfirmation($user, $order);
-
-        // 2. ✅ Rappel de livraison J-1
         $this->scheduleDeliveryReminder($user, $order);
-
-        // 3. ✅ Newsletter post-achat
         $this->schedulePostPurchaseNewsletter($user, $order);
     }
 
     private function sendConfirmation(User $user, Order $order): void
     {
+        $body = MessageViewBodyVO::from([
+            'view' => 'emails.order-confirmation',
+            'data' => [
+                'user' => $user,
+                'order' => $order,
+                'items' => $order->items,
+                'total' => $order->total,
+            ],
+        ]);
+
         $message = new NotificationMessageVO(
-            body: new MessageBodyVO("Votre commande #{$order->id} a été confirmée."),
-            subject: new MessageSubjectVO('Commande confirmée'),
+            body: $body,
+            subject: new MessageSubjectVO("Commande #{$order->id} confirmée"),
         );
 
         $options = SendOptions::init()
@@ -641,7 +839,7 @@ class OrderService
             ->sendNow($user, $message);
 
         if (!$results->allSuccess()) {
-            Log::warning('Confirmation d\'ordre partiellement échouée', [
+            Log::warning('Confirmation partiellement échouée', [
                 'order_id' => $order->id,
                 'success' => $results->getSuccessCount(),
                 'failed' => $results->getFailureCount(),
@@ -651,9 +849,18 @@ class OrderService
 
     private function scheduleDeliveryReminder(User $user, Order $order): void
     {
+        $body = MessageViewBodyVO::from([
+            'view' => 'emails.delivery-reminder',
+            'data' => [
+                'user' => $user,
+                'order' => $order,
+                'delivery_date' => $order->delivery_date,
+            ],
+        ]);
+
         $message = new NotificationMessageVO(
-            body: new MessageBodyVO("Votre commande #{$order->id} sera livrée demain."),
-            subject: new MessageSubjectVO('Livraison prévue demain'),
+            body: $body,
+            subject: new MessageSubjectVO("Livraison prévue demain"),
         );
 
         $options = SendOptions::init()
@@ -661,7 +868,7 @@ class OrderService
             ->withDestinationFilter(MailChannel::class, $user->email);
 
         $record = new SendLaterRecord(
-            delay_seconds: 86400, // 24h
+            delay_seconds: 86400,
             channels: $options->channels,
             limit_per_channel: 1,
         );
@@ -674,8 +881,17 @@ class OrderService
 
     private function schedulePostPurchaseNewsletter(User $user, Order $order): void
     {
+        $body = MessageViewBodyVO::from([
+            'view' => 'emails.post-purchase-newsletter',
+            'data' => [
+                'user' => $user,
+                'order' => $order,
+                'recommendations' => $this->getRecommendations($order),
+            ],
+        ]);
+
         $message = new NotificationMessageVO(
-            body: new MessageBodyVO('Découvrez nos offres exclusives.'),
+            body: $body,
             subject: new MessageSubjectVO('Offres exclusives'),
         );
 
@@ -685,7 +901,7 @@ class OrderService
             ->withLimitPerChannel(1);
 
         $record = new SendRecurringRecord(
-            interval_seconds: 604800, // 7 jours
+            interval_seconds: 604800,
             start_at: new NotificationDateTimeVO(now()->addWeek()->toIso8601String()),
             end_at: new NotificationDateTimeVO(now()->addWeeks(4)->toIso8601String()),
         );
@@ -700,7 +916,6 @@ class OrderService
 
     public function cancelOrder(Order $order): void
     {
-        // ✅ Annuler les notifications planifiées
         if ($order->reminder_task) {
             $this->service->cancel($order->reminder_task);
         }
@@ -714,10 +929,13 @@ class OrderService
 }
 ```
 
+---
+
 ## Voir aussi
 - `NotificationServiceInterface` - Interface du service
 - `SendOptions` - Options de configuration
 - `NotificationMessageVO` - Message de notification
+- `MessageViewBodyVO` - Corps de message basé sur une vue
 - `SendNowRecord` - Record d'envoi immédiat
 - `SendLaterRecord` - Record d'envoi différé
 - `SendAtRecord` - Record d'envoi planifié

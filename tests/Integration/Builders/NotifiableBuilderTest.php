@@ -16,6 +16,7 @@ use AndyDefer\LaravelNotification\Repositories\NotificationRepository;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Models\TestUser;
 use AndyDefer\LaravelNotification\Tests\TestCase;
+use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 use AndyDefer\Repository\Records\FindByRecord;
 use AndyDefer\Task\Repositories\RecurringTaskRepository;
@@ -23,6 +24,7 @@ use AndyDefer\Task\Repositories\UniqueTaskRepository;
 use AndyDefer\Task\ValueObjects\TaskAliasVO;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\View;
 use InvalidArgumentException;
 
 final class NotifiableBuilderTest extends TestCase
@@ -40,6 +42,8 @@ final class NotifiableBuilderTest extends TestCase
         parent::setUp();
 
         $this->runDatabaseMigrations();
+
+        View::addNamespace('test', __DIR__.'/../../Fixtures/resources/views');
 
         $this->repository = app(NotificationRepository::class);
         $this->service = app(NotificationServiceInterface::class);
@@ -703,5 +707,247 @@ final class NotifiableBuilderTest extends TestCase
         $this->assertContains('test_destination_1', $destinations);
         $this->assertContains('test_destination_2', $destinations);
         $this->assertContains('test_destination_3', $destinations);
+    }
+
+    // ============================================================
+    // TESTS: MessageViewBodyVO avec NotifiableBuilder
+    // ============================================================
+
+    public function test_send_now_with_message_view_body_vo(): void
+    {
+        // Arrange : Créer un body avec vue
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+        ]);
+
+        // Act : Envoyer avec le builder
+        $results = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Welcome Email')
+            ->body($viewBody)
+            ->type('welcome')
+            ->sendNow();
+
+        // Assert : Vérifier que l'envoi a réussi
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertTrue($results->allSuccess());
+        $this->assertCount(1, $results);
+
+        // Assert : Vérifier que le résultat est un succès
+        $result = $results->first();
+        $this->assertTrue($result->success);
+        $this->assertEquals(TestChannel::class, $result->channel->getValue());
+        $this->assertEquals('test_destination', $result->destination);
+    }
+
+    public function test_send_now_with_message_view_body_vo_plain_text(): void
+    {
+        // Arrange : Créer un body en mode plainText
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+            'plainText' => true,
+        ]);
+
+        // Act : Envoyer avec le builder
+        $results = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('SMS Welcome')
+            ->body($viewBody)
+            ->type('sms_welcome')
+            ->sendNow();
+
+        // Assert : Vérifier que l'envoi a réussi
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertTrue($results->allSuccess());
+        $this->assertCount(1, $results);
+
+        $result = $results->first();
+        $this->assertTrue($result->success);
+        $this->assertEquals(TestChannel::class, $result->channel->getValue());
+        $this->assertEquals('test_destination', $result->destination);
+    }
+
+    public function test_send_later_with_message_view_body_vo(): void
+    {
+        // Arrange : Geler le temps
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        // Arrange : Créer un body avec vue
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+        ]);
+
+        // Act : Planifier l'envoi
+        $alias = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Delayed Welcome')
+            ->body($viewBody)
+            ->type('delayed_welcome')
+            ->sendLater(300);
+
+        // Assert : Vérifier que la tâche a été créée
+        $this->assertInstanceOf(TaskAliasVO::class, $alias);
+
+        $task = app(UniqueTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+
+        $this->assertEquals(
+            $frozenNow->copy()->addSeconds(300)->toIso8601String(),
+            $task->getScheduledAt()->toIso8601()
+        );
+    }
+
+    public function test_send_later_with_message_view_body_vo_plain_text(): void
+    {
+        // Arrange : Geler le temps
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        // Arrange : Créer un body en mode plainText
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+            'plainText' => true,
+        ]);
+
+        // Act : Planifier l'envoi
+        $alias = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Delayed SMS')
+            ->body($viewBody)
+            ->type('delayed_sms')
+            ->sendLater(300);
+
+        // Assert : Vérifier que la tâche a été créée
+        $this->assertInstanceOf(TaskAliasVO::class, $alias);
+
+        $task = app(UniqueTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+
+        $this->assertEquals(
+            $frozenNow->copy()->addSeconds(300)->toIso8601String(),
+            $task->getScheduledAt()->toIso8601()
+        );
+    }
+
+    public function test_send_at_with_message_view_body_vo(): void
+    {
+        // Arrange : Geler le temps
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        // Arrange : Créer un body avec vue
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+        ]);
+
+        $scheduledAt = new NotificationDateTimeVO($frozenNow->copy()->addHours(2)->toIso8601String());
+
+        // Act : Planifier l'envoi
+        $alias = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Scheduled Welcome')
+            ->body($viewBody)
+            ->type('scheduled_welcome')
+            ->sendAt($scheduledAt);
+
+        // Assert : Vérifier que la tâche a été créée
+        $task = app(UniqueTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+
+        $this->assertEquals(
+            $scheduledAt->forDatabase(),
+            $task->getScheduledAt()->forDatabase()
+        );
+    }
+
+    public function test_send_recurring_with_message_view_body_vo(): void
+    {
+        // Arrange : Geler le temps
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        // Arrange : Créer un body avec vue
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+        ]);
+
+        $startAt = new NotificationDateTimeVO($frozenNow->toIso8601String());
+
+        // Act : Planifier un envoi récurrent
+        $alias = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Recurring Welcome')
+            ->body($viewBody)
+            ->type('recurring_welcome')
+            ->sendRecurring(3600, $startAt);
+
+        // Assert : Vérifier que la tâche récurrente a été créée
+        $task = app(RecurringTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+        $this->assertEquals(3600, $task->getIntervalSeconds()->getValue());
+    }
+
+    public function test_send_recurring_with_message_view_body_vo_plain_text(): void
+    {
+        // Arrange : Geler le temps
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        // Arrange : Créer un body en mode plainText
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+            'plainText' => true,
+        ]);
+
+        $startAt = new NotificationDateTimeVO($frozenNow->toIso8601String());
+
+        // Act : Planifier un envoi récurrent
+        $alias = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Recurring SMS')
+            ->body($viewBody)
+            ->type('recurring_sms')
+            ->sendRecurring(3600, $startAt);
+
+        // Assert : Vérifier que la tâche récurrente a été créée
+        $task = app(RecurringTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+        $this->assertEquals(3600, $task->getIntervalSeconds()->getValue());
+    }
+
+    public function test_message_view_body_vo_with_merge_data_in_builder(): void
+    {
+        // Arrange : Créer un body avec mergeData
+        $viewBody = MessageViewBodyVO::from([
+            'view' => 'test::welcome',
+            'data' => ['name' => 'John Doe'],
+            'mergeData' => ['signature' => 'L\'équipe Afya'],
+        ]);
+
+        // Act : Envoyer avec le builder
+        $results = NotifiableBuilder::create()
+            ->to(TestChannel::class, 'test_destination')
+            ->subject('Welcome with Signature')
+            ->body($viewBody)
+            ->type('welcome_with_signature')
+            ->sendNow();
+
+        // Assert : Vérifier que l'envoi a réussi
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertTrue($results->allSuccess());
+        $this->assertCount(1, $results);
+
+        $result = $results->first();
+        $this->assertTrue($result->success);
+        $this->assertEquals(TestChannel::class, $result->channel->getValue());
+        $this->assertEquals('test_destination', $result->destination);
     }
 }
