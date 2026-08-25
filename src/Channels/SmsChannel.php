@@ -29,20 +29,12 @@ final class SmsChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.sms.enabled', false);
+        return $this->config->getSmsConfig()->enabled;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.sms', [
-            'enabled' => false,
-            'driver' => 'twilio',
-            'sid' => env('TWILIO_SID'),
-            'token' => env('TWILIO_TOKEN'),
-            'from' => env('TWILIO_FROM'),
-        ]);
-
-        return SmsConfigRecord::from($config);
+        return $this->config->getSmsConfig();
     }
 
     public function createDriver(): AbstractDriver

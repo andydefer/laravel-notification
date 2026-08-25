@@ -29,19 +29,12 @@ final class WhatsAppChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.whatsapp.enabled', false);
+        return $this->config->getWhatsAppConfig()->enabled;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.whatsapp', [
-            'enabled' => false,
-            'driver' => 'meta',
-            'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
-            'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
-        ]);
-
-        return WhatsAppConfigRecord::from($config);
+        return $this->config->getWhatsAppConfig();
     }
 
     public function createDriver(): AbstractDriver

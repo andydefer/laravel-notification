@@ -29,17 +29,12 @@ final class DatabaseChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.database.enabled', true);
+        return true;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.database', [
-            'driver' => 'database',
-            'table' => 'notifications',
-        ]);
-
-        return DatabaseConfigRecord::from($config);
+        return $this->config->getDatabaseConfig();
     }
 
     public function createDriver(): AbstractDriver

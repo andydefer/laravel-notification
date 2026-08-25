@@ -29,25 +29,12 @@ final class PushChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.push.enabled', false);
+        return $this->config->getPushConfig()->enabled;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.push', [
-            'enabled' => false,
-            'platform' => 'fcm',
-            'fcm_api_key' => env('FCM_API_KEY'),
-            'fcm_project_id' => env('FCM_PROJECT_ID'),
-            'apns_key_path' => env('APNS_KEY_PATH'),
-            'apns_key_id' => env('APNS_KEY_ID'),
-            'apns_team_id' => env('APNS_TEAM_ID'),
-            'apns_bundle_id' => env('APNS_BUNDLE_ID'),
-            'default_sound' => 'default',
-            'default_tokens' => [],
-        ]);
-
-        return PushConfigRecord::from($config);
+        return $this->config->getPushConfig();
     }
 
     public function createDriver(): AbstractDriver

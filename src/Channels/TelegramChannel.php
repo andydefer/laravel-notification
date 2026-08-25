@@ -29,18 +29,12 @@ final class TelegramChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.telegram.enabled', false);
+        return $this->config->getTelegramConfig()->enabled;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.telegram', [
-            'enabled' => false,
-            'bot_token' => env('TELEGRAM_BOT_TOKEN'),
-            'chat_id' => env('TELEGRAM_CHAT_ID'),
-        ]);
-
-        return TelegramConfigRecord::from($config);
+        return $this->config->getTelegramConfig();
     }
 
     public function createDriver(): AbstractDriver

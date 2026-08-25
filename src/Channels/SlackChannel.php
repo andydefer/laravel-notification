@@ -29,17 +29,12 @@ final class SlackChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.slack.enabled', false);
+        return $this->config->getSlackConfig()->enabled;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.slack', [
-            'enabled' => false,
-            'webhook_url' => env('SLACK_WEBHOOK_URL'),
-        ]);
-
-        return SlackConfigRecord::from($config);
+        return $this->config->getSlackConfig();
     }
 
     public function createDriver(): AbstractDriver

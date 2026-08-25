@@ -128,14 +128,11 @@ interface NotificationServiceInterface
      * Set options for the next send operation.
      *
      * @param  SendOptions  $options  The send options
-     * @return $this
      */
     public function withOptions(SendOptions $options): self;
 
     /**
      * Reset the pending options.
-     *
-     * @return $this
      */
     public function resetOptions(): self;
 }

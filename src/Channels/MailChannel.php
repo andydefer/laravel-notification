@@ -1,5 +1,7 @@
 <?php
 
+// src/Channels/MailChannel.php
+
 declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Channels;
@@ -29,19 +31,12 @@ final class MailChannel extends AbstractChannel
 
     public function isEnabled(): bool
     {
-        return $this->configRepository->get('notification.channels.mail.enabled', true);
+        return $this->config->getMailConfig()->enabled;
     }
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.mail', [
-            'driver' => 'mail',
-            'default_to' => env('MAIL_DEFAULT_TO'),
-            'default_from' => env('MAIL_FROM_ADDRESS'),
-            'default_from_name' => env('MAIL_FROM_NAME'),
-        ]);
-
-        return MailConfigRecord::from($config);
+        return $this->config->getMailConfig();
     }
 
     public function createDriver(): AbstractDriver
