@@ -6,6 +6,8 @@ namespace AndyDefer\LaravelNotification;
 
 use AndyDefer\DomainStructures\Services\HydrationService;
 use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
+use AndyDefer\LaravelNotification\Configs\NotificationConfig;
+use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
 use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcessorInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
@@ -21,6 +23,22 @@ final class NotificationServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // ✅ Enregistrer la classe concrète en singleton
+        $this->app->singleton(
+            abstract: NotificationConfig::class,
+            concrete: function ($app) {
+                return new NotificationConfig(
+                    $app['config'],
+                );
+            }
+        );
+
+        // ✅ Bind l'interface vers la classe concrète
+        $this->app->bind(
+            abstract: NotificationConfigInterface::class,
+            concrete: NotificationConfig::class
+        );
+
         // ✅ Repository - Bind interface to concrete implementation
         $this->app->singleton(
             abstract: NotificationRepositoryInterface::class,

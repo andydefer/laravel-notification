@@ -72,6 +72,7 @@ final class MailDriver extends AbstractDriver
      */
     public function validateConfiguration(): bool
     {
+
         return $this->config->enabled
             && ($this->config->default_from !== null);
     }
