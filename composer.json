@@ -4,7 +4,8 @@
     "license": "MIT",
     "autoload": {
         "psr-4": {
-            "AndyDefer\\LaravelNotification\\": "src/"
+            "AndyDefer\\LaravelNotification\\": "src/",
+            "AndyDefer\\LaravelNotification\\Database\\Factories\\": "database/factories/"
         }
     },
     "autoload-dev": {

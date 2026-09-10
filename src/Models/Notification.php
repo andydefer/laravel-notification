@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Models;
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
+use AndyDefer\LaravelNotification\Database\Factories\NotificationFactory;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\PhpVo\ValueObjects\DateTimeVO;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -36,6 +38,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 final class Notification extends Model
 {
+    use HasFactory;
     use SoftDeletes;
 
     /**
@@ -78,6 +81,14 @@ final class Notification extends Model
         'sent_at',
         'read_at',
     ];
+
+    /**
+     * Create a new factory instance for the model.
+     */
+    protected static function newFactory(): NotificationFactory
+    {
+        return NotificationFactory::new();
+    }
 
     /**
      * The attributes that should be cast.

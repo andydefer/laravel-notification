@@ -10,11 +10,14 @@ use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
+use AndyDefer\LaravelNotification\Traits\HasNotifications;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use Illuminate\Database\Eloquent\Model;
 
 final class TestUser extends Model implements NotifiableInterface
 {
+    use HasNotifications;
+
     protected $table = 'test_users';
 
     protected $fillable = [

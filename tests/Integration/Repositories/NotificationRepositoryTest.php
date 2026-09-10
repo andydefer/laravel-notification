@@ -23,12 +23,12 @@ use AndyDefer\LaravelNotification\ValueObjects\UuidVO;
 use AndyDefer\Repository\Enums\SortDirection;
 use AndyDefer\Repository\Records\FindByRecord;
 use AndyDefer\Repository\Records\PaginateRecord;
-use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
 final class NotificationRepositoryTest extends TestCase
 {
-    use DatabaseMigrations;
+    use RefreshDatabase;
 
     private NotificationRepository $repository;
 
@@ -43,8 +43,6 @@ final class NotificationRepositoryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->runDatabaseMigrations();
 
         DB::table('notifications')->delete();
 
@@ -66,14 +64,9 @@ final class NotificationRepositoryTest extends TestCase
         parent::tearDown();
     }
 
-    private function generateSessionId(): UuidVO
-    {
-        return UuidVO::generate();
-    }
-
     private function createMessage(
-        string $body,
-        string $subject,
+        string $body = 'Test message',
+        string $subject = 'Test Subject',
         string $type = 'test',
         array $data = []
     ): NotificationMessageVO {
@@ -86,37 +79,34 @@ final class NotificationRepositoryTest extends TestCase
     }
 
     private function createNotification(
-        string $type,
-        FqcnChannelVO $channel,
+        string $type = 'test',
+        ?FqcnChannelVO $channel = null,
         string $destination = 'test@example.com',
-        string $body = 'Test message',
-        string $subject = 'Test Subject',
         NotificationStatus $status = NotificationStatus::PENDING,
-        array $data = []
+        ?string $sessionId = null,
     ): Notification {
-        $id = UuidVO::generate();
-        $sessionId = $this->generateSessionId();
-        $message = $this->createMessage($body, $subject, $type, $data);
+        $channel = $channel ?? $this->mailChannelVO;
+        $message = $this->createMessage(type: $type);
 
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $sessionId,
-            channel: $channel,
-            destination: $destination,
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-            status: $status,
-        );
+        $factory = Notification::factory()
+            ->channel($channel->getValue())
+            ->to($destination)
+            ->state([
+                'session_id' => $sessionId ?? UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $message->toArray(),
+                'status' => $status->value,
+            ]);
 
-        return $this->repository->create($record);
+        return $factory->create();
     }
 
     public function test_create_notification(): void
     {
         // Arrange : Prepare notification data
         $id = UuidVO::generate();
-        $sessionId = $this->generateSessionId();
+        $sessionId = UuidVO::generate();
         $message = $this->createMessage(
             body: 'Bienvenue',
             subject: 'Bienvenue sur notre plateforme',
@@ -160,7 +150,7 @@ final class NotificationRepositoryTest extends TestCase
     {
         // Arrange : Prepare notification data with SENT status
         $id = UuidVO::generate();
-        $sessionId = $this->generateSessionId();
+        $sessionId = UuidVO::generate();
         $message = $this->createMessage(
             body: 'Payment received',
             subject: 'Payment confirmation',
@@ -193,22 +183,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_returns_notification(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $sessionId = $this->generateSessionId();
-        $message = $this->createMessage(body: 'Test', subject: 'Test Subject');
-
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $sessionId,
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $created = $this->repository->create($record);
+        // Arrange : Create a notification using factory
+        $created = $this->createNotification();
 
         // Act : Find the notification
         $found = $this->repository->find($created->getId());
@@ -231,7 +207,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_by_with_filters(): void
     {
-        // Arrange : Create notifications with different channels
+        // Arrange : Create notifications with different channels using factory
         $this->createNotification('welcome', $this->mailChannelVO);
         $this->createNotification('welcome', $this->mailChannelVO);
         $this->createNotification('payment', $this->smsChannelVO);
@@ -254,7 +230,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_by_with_limit(): void
     {
-        // Arrange : Create multiple notifications
+        // Arrange : Create multiple notifications using factory
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
@@ -275,7 +251,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_by_with_notifiable_filter(): void
     {
-        // Arrange : Create notifications for a user
+        // Arrange : Create notifications for a user using factory
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
 
@@ -299,9 +275,9 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_by_with_status_filter(): void
     {
-        // Arrange : Create notifications with different statuses
-        $this->createNotification('test', $this->mailChannelVO, 'test@example.com', 'Test', 'Test', NotificationStatus::SENT);
-        $this->createNotification('test', $this->mailChannelVO, 'test@example.com', 'Test', 'Test', NotificationStatus::PENDING);
+        // Arrange : Create notifications with different statuses using factory
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::PENDING);
 
         $filter = NotificationFilterRecord::from([
             'status' => NotificationStatus::SENT,
@@ -319,33 +295,11 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_by_with_read_filter(): void
     {
-        // Arrange : Create read and unread notifications
-        $sessionId1 = $this->generateSessionId();
-        $message = $this->createMessage('Read', 'Read Subject');
-
-        $record1 = new NotificationRecord(
-            id: UuidVO::generate(),
-            session_id: $sessionId1,
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-        $read = $this->repository->create($record1);
+        // Arrange : Create read and unread notifications using factory
+        $read = $this->createNotification();
         $this->repository->markAsRead($read->getId());
 
-        $sessionId2 = $this->generateSessionId();
-        $record2 = new NotificationRecord(
-            id: UuidVO::generate(),
-            session_id: $sessionId2,
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-        $this->repository->create($record2);
+        $this->createNotification();
 
         $filter = NotificationFilterRecord::from([
             'read' => true,
@@ -364,7 +318,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_by_with_destination_filter(): void
     {
-        // Arrange : Create notifications with different destinations
+        // Arrange : Create notifications with different destinations using factory
         $this->createNotification('test', $this->mailChannelVO, 'test1@example.com');
         $this->createNotification('test', $this->mailChannelVO, 'test2@example.com');
 
@@ -386,7 +340,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_count_by_criteria(): void
     {
-        // Arrange : Create notifications with different channels
+        // Arrange : Create notifications with different channels using factory
         $this->createNotification('welcome', $this->mailChannelVO);
         $this->createNotification('welcome', $this->mailChannelVO);
         $this->createNotification('payment', $this->smsChannelVO);
@@ -404,7 +358,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_count_all_when_no_filters(): void
     {
-        // Arrange : Create multiple notifications
+        // Arrange : Create multiple notifications using factory
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
 
@@ -417,7 +371,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_count_by_notifiable(): void
     {
-        // Arrange : Create notifications for a user
+        // Arrange : Create notifications for a user using factory
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
 
@@ -430,31 +384,9 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_count_by_status(): void
     {
-        // Arrange : Create notifications with different statuses
-        $message = $this->createMessage('Test', 'Test Subject');
-
-        $record1 = new NotificationRecord(
-            id: UuidVO::generate(),
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-        $this->repository->create($record1);
-
-        $record2 = new NotificationRecord(
-            id: UuidVO::generate(),
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-            status: NotificationStatus::SENT,
-        );
-        $this->repository->create($record2);
+        // Arrange : Create notifications with different statuses using factory
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::PENDING);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
 
         // Act : Count by status
         $pendingCount = $this->repository->countByStatus($this->user, NotificationStatus::PENDING);
@@ -469,7 +401,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_exists_returns_true_when_found(): void
     {
-        // Arrange : Create a notification
+        // Arrange : Create a notification using factory
         $this->createNotification('test', $this->mailChannelVO);
 
         $filter = NotificationFilterRecord::from([
@@ -503,20 +435,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_update_notification(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Original', 'Original Subject', 'original');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
 
         // Arrange : Prepare updated data
         $newMessage = $this->createMessage('Updated', 'Updated Subject', 'updated');
@@ -539,20 +459,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_mark_as_read(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
 
         // Assert : Initially not read
         $this->assertNull($model->getReadAt());
@@ -570,20 +478,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_mark_as_delivered(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
 
         // Assert : Initially PENDING
         $this->assertEquals(NotificationStatus::PENDING, $model->getStatus());
@@ -599,20 +495,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_mark_as_sent(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
 
         // Assert : Initially not sent
         $this->assertEquals(NotificationStatus::PENDING, $model->getStatus());
@@ -630,20 +514,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_mark_as_failed(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
 
         // Assert : Initially not failed
         $this->assertEquals(NotificationStatus::PENDING, $model->getStatus());
@@ -663,39 +535,19 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_mark_as_read_by_session(): void
     {
-        // Arrange : Create multiple notifications in same session
-        $sessionId = $this->generateSessionId();
-        $message = $this->createMessage('Test', 'Test Subject');
+        // Arrange : Create multiple notifications in same session using factory
+        $sessionId = UuidVO::generate()->getValue();
 
-        $record1 = new NotificationRecord(
-            id: UuidVO::generate(),
-            session_id: $sessionId,
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-        $this->repository->create($record1);
-
-        $record2 = new NotificationRecord(
-            id: UuidVO::generate(),
-            session_id: $sessionId,
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-        $this->repository->create($record2);
+        $this->createNotification('test', $this->mailChannelVO, sessionId: $sessionId);
+        $this->createNotification('test', $this->mailChannelVO, sessionId: $sessionId);
 
         // Act : Mark all notifications in session as read
-        $count = $this->repository->markAsReadBySession($sessionId->getValue());
+        $count = $this->repository->markAsReadBySession($sessionId);
 
         // Assert : Verify all notifications were marked as read
         $this->assertEquals(2, $count);
 
-        $notifications = Notification::where('session_id', $sessionId->getValue())->get();
+        $notifications = Notification::where('session_id', $sessionId)->get();
         foreach ($notifications as $notification) {
             $this->assertNotNull($notification->getReadAt());
             $this->assertTrue($notification->isRead());
@@ -706,28 +558,16 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_delete_notification(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
-        $this->assertDatabaseHas('notifications', ['id' => $id->getValue()]);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
+        $this->assertDatabaseHas('notifications', ['id' => $model->getId()]);
 
         // Act : Delete the notification
         $deleted = $this->repository->delete($model->getId());
 
         // Assert : Verify the notification was soft deleted
         $this->assertTrue($deleted);
-        $this->assertSoftDeleted('notifications', ['id' => $id->getValue()]);
+        $this->assertSoftDeleted('notifications', ['id' => $model->getId()]);
     }
 
     public function test_delete_returns_false_when_not_found(): void
@@ -741,7 +581,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_delete_bulk(): void
     {
-        // Arrange : Create multiple notifications
+        // Arrange : Create multiple notifications using factory
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('other', $this->smsChannelVO);
@@ -764,23 +604,11 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_restore_soft_deleted_notification(): void
     {
-        // Arrange : Create and soft delete a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create and soft delete a notification using factory
+        $model = $this->createNotification();
         $this->repository->delete($model->getId());
 
-        $this->assertSoftDeleted('notifications', ['id' => $id->getValue()]);
+        $this->assertSoftDeleted('notifications', ['id' => $model->getId()]);
 
         // Act : Restore the notification
         $restored = $this->repository->restore($model->getId());
@@ -788,7 +616,7 @@ final class NotificationRepositoryTest extends TestCase
         // Assert : Verify the notification was restored
         $this->assertTrue($restored);
         $this->assertDatabaseHas('notifications', [
-            'id' => $id->getValue(),
+            'id' => $model->getId(),
             'deleted_at' => null,
         ]);
     }
@@ -806,33 +634,21 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_force_delete_permanently_removes_notification(): void
     {
-        // Arrange : Create a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
-        $this->assertDatabaseHas('notifications', ['id' => $id->getValue()]);
+        // Arrange : Create a notification using factory
+        $model = $this->createNotification();
+        $this->assertDatabaseHas('notifications', ['id' => $model->getId()]);
 
         // Act : Force delete the notification
         $deleted = $this->repository->forceDelete($model->getId());
 
         // Assert : Verify the notification was permanently removed
         $this->assertTrue($deleted);
-        $this->assertDatabaseMissing('notifications', ['id' => $id->getValue()]);
+        $this->assertDatabaseMissing('notifications', ['id' => $model->getId()]);
     }
 
     public function test_force_delete_bulk(): void
     {
-        // Arrange : Create multiple notifications
+        // Arrange : Create multiple notifications using factory
         $this->createNotification('test', $this->mailChannelVO);
         $this->createNotification('test', $this->mailChannelVO);
 
@@ -854,20 +670,8 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_find_with_trashed_returns_soft_deleted(): void
     {
-        // Arrange : Create and soft delete a notification
-        $id = UuidVO::generate();
-        $message = $this->createMessage('Test', 'Test Subject');
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $this->generateSessionId(),
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
-
-        $model = $this->repository->create($record);
+        // Arrange : Create and soft delete a notification using factory
+        $model = $this->createNotification();
         $this->repository->delete($model->getId());
 
         // Act : Find the soft deleted notification
@@ -875,7 +679,7 @@ final class NotificationRepositoryTest extends TestCase
 
         // Assert : Verify the soft deleted notification is found
         $this->assertNotNull($found);
-        $this->assertEquals($id->getValue(), $found->getId());
+        $this->assertEquals($model->getId(), $found->getId());
         $this->assertNotNull($found->getDeletedAt());
     }
 
@@ -883,7 +687,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_paginate_returns_paginated_results(): void
     {
-        // Arrange : Create multiple notifications
+        // Arrange : Create multiple notifications using factory
         for ($i = 0; $i < 15; $i++) {
             $this->createNotification('test', $this->mailChannelVO);
         }
@@ -908,7 +712,7 @@ final class NotificationRepositoryTest extends TestCase
 
     public function test_paginate_with_sorting(): void
     {
-        // Arrange : Create notifications with different channels
+        // Arrange : Create notifications with different channels using factory
         $this->createNotification('aaa', $this->mailChannelVO);
         $this->createNotification('zzz', $this->mailChannelVO);
         $this->createNotification('mmm', $this->mailChannelVO);

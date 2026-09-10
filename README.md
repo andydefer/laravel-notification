@@ -1,3 +1,4 @@
+```markdown
 # Laravel Notification
 
 **Système de notifications multi-canaux pour Laravel. Persistance, traçabilité, multiples destinations, planification avancée - avec une architecture extensible.**
@@ -28,7 +29,8 @@
 12. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
 13. [Cas d'usage concrets](#cas-dusage-concrets)
 14. [Bonnes pratiques](#bonnes-pratiques)
-15. [Référence de l'API](#référence-de-lapi)
+15. [Trait HasNotifications](#trait-hasnotifications)
+16. [Référence de l'API](#référence-de-lapi)
 
 ---
 
@@ -69,6 +71,7 @@ php artisan vendor:publish --tag=notification-config
 | Architecture extensible | ⚠️ (complexe) | ✅ (simple) |
 | Envoi sans entité Notifiable | ❌ | ✅ (NotifiableBuilder) |
 | Corps de message basé sur vue Laravel | ❌ | ✅ (MessageViewBodyVO) |
+| Trait utilitaire pour les modèles | ❌ | ✅ (HasNotifications) |
 
 ### En une phrase
 
@@ -110,6 +113,7 @@ L'architecture du package repose sur plusieurs composants clés :
 | `SendDelayedNotificationTask` | Tâche unique pour les envois différés/planifiés |
 | `SendRecurringNotificationTask` | Tâche récurrente pour les envois périodiques |
 | `MessageViewBodyVO` | Value Object pour corps de message basé sur vue Laravel |
+| `HasNotifications` | Trait utilitaire pour les modèles Eloquent recevant des notifications |
 
 ---
 
@@ -1605,6 +1609,146 @@ $service->sendNow($user, $message);
 
 ---
 
+## Trait HasNotifications
+
+Le trait `HasNotifications` fournit une API riche et idiomatique pour les modèles Eloquent qui reçoivent des notifications. Il encapsule le `NotificationRepositoryInterface` pour éviter la duplication de logique et expose des **attributs calculés** (via `Attribute` d'Eloquent) ainsi que des **méthodes d'action**.
+
+### Prérequis
+
+- Le modèle doit étendre `Illuminate\Database\Eloquent\Model`
+- Le modèle doit utiliser le package `andydefer/laravel-notification`
+
+### Installation
+
+Ajoutez simplement le trait à votre modèle :
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use AndyDefer\LaravelNotification\Traits\HasNotifications;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+
+final class User extends Authenticatable
+{
+    use HasNotifications;
+}
+```
+
+### Relation polymorphe
+
+```php
+// La relation MorphMany native vers le modèle Notification
+foreach ($user->notifications as $notification) {
+    echo $notification->getSubject();
+}
+```
+
+### Attributs calculés
+
+Le trait expose les attributs suivants, accessibles comme des propriétés du modèle :
+
+| Attribut | Type | Description |
+|----------|------|-------------|
+| `unread_notifications_count` | `int` | Nombre de notifications non lues |
+| `unread_notifications` | `Collection<int, Notification>` | Collection des notifications non lues |
+| `read_notifications` | `Collection<int, Notification>` | Collection des notifications lues |
+| `sent_notifications` | `Collection<int, Notification>` | Collection des notifications envoyées |
+| `pending_notifications` | `Collection<int, Notification>` | Collection des notifications en attente |
+| `failed_notifications` | `Collection<int, Notification>` | Collection des notifications échouées |
+| `latest_notifications` | `Collection<int, Notification>` | Les 10 dernières notifications (tous canaux) |
+| `database_notifications` | `Collection<int, Notification>` | Toutes les notifications du canal `DatabaseChannel` |
+| `latest_database_notifications` | `Collection<int, Notification>` | Les 10 dernières notifications du canal `DatabaseChannel` |
+| `has_unread_notifications` | `bool` | Indique s'il y a des notifications non lues |
+| `has_notifications` | `bool` | Indique s'il y a au moins une notification |
+
+### Méthodes d'action
+
+| Méthode | Description | Retour |
+|---------|-------------|--------|
+| `markNotificationAsRead(string $notificationId): bool` | Marque une notification comme lue | `bool` |
+| `markAllNotificationsAsRead(): int` | Marque toutes les notifications non lues comme lues | `int` |
+| `deleteNotification(string $notificationId): bool` | Supprime (soft delete) une notification | `bool` |
+| `deleteAllNotifications(): int` | Supprime toutes les notifications du modèle | `int` |
+| `deleteReadNotifications(): int` | Supprime uniquement les notifications déjà lues | `int` |
+| `countNotificationsByStatus(NotificationStatus $status): int` | Compte les notifications par statut | `int` |
+| `notificationsByChannel(string $channel, int $limit = 10): Collection` | Récupère les notifications d'un canal spécifique | `Collection` |
+
+### Exemples d'utilisation
+
+#### Afficher le badge de notifications non lues
+
+```php
+// Dans un middleware Inertia
+public function share(Request $request): array
+{
+    $user = auth()->user();
+
+    return [
+        'unreadNotificationsCount' => $user?->unread_notifications_count ?? 0,
+    ];
+}
+```
+
+#### Afficher les notifications en base de données pour un panneau dédié
+
+```php
+// Dans un contrôleur
+public function databaseNotifications(Request $request)
+{
+    $notifications = $request->user()->database_notifications;
+
+    return NotificationData::collect($notifications);
+}
+```
+
+#### Widget des dernières notifications en base
+
+```php
+// Récupérer les 10 dernières notifications du canal DatabaseChannel
+$latest = $request->user()->latest_database_notifications;
+```
+
+#### Marquer toutes les notifications comme lues
+
+```php
+// Dans un contrôleur
+public function markAllAsRead(Request $request)
+{
+    $count = $request->user()->markAllNotificationsAsRead();
+
+    return response()->json(['marked' => $count]);
+}
+```
+
+#### Récupérer les notifications d'un canal spécifique
+
+```php
+use AndyDefer\LaravelNotification\Channels\MailChannel;
+
+$notifications = $user->notificationsByChannel(MailChannel::class, limit: 20);
+```
+
+### Avantages du trait
+
+- **API unifiée** : Toutes les opérations courantes en une seule place
+- **Attributs Eloquent natifs** : Accès direct via les propriétés du modèle
+- **Pas de duplication** : Encapsule le repository sous-jacent
+- **Scoping automatique** : Les requêtes sont toujours limitées au modèle courant
+- **Compatible avec les autres packages** : Utilise `FindByRecord` et `SortColumns` du package `laravel-repository`
+
+### Voir aussi
+
+- `NotificationRepositoryInterface` - Repository sous-jacent
+- `NotificationFilterRecord` - Record de filtres
+- `Notification` - Modèle Eloquent
+- `DatabaseChannel` - Canal de persistance en base
+
+---
+
 ## Référence de l'API
 
 ### NotificationService
@@ -1659,6 +1803,19 @@ $service->sendNow($user, $message);
 | `withDestinationFilters(array $filters): self` | Remplace tous les filtres | `self` |
 | `getDestinationFilters(): ?StrictAssociative` | Récupère les filtres | `?StrictAssociative` |
 
+### HasNotifications (trait)
+
+| Méthode | Description | Retour |
+|---------|-------------|--------|
+| `notifications(): MorphMany` | Relation polymorphe native | `MorphMany` |
+| `markNotificationAsRead(string $notificationId): bool` | Marque une notification comme lue | `bool` |
+| `markAllNotificationsAsRead(): int` | Marque toutes les notifications non lues comme lues | `int` |
+| `deleteNotification(string $notificationId): bool` | Supprime (soft delete) une notification | `bool` |
+| `deleteAllNotifications(): int` | Supprime toutes les notifications | `int` |
+| `deleteReadNotifications(): int` | Supprime uniquement les notifications lues | `int` |
+| `countNotificationsByStatus(NotificationStatus $status): int` | Compte par statut | `int` |
+| `notificationsByChannel(string $channel, int $limit = 10): Collection` | Récupère les notifications d'un canal | `Collection` |
+
 ### SendResultCollection
 
 | Méthode | Description |
@@ -1703,4 +1860,4 @@ $service->sendNow($user, $message);
 ## Licence
 
 MIT © [Andy Defer](https://github.com/andydefer)
----
+```
