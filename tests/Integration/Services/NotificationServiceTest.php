@@ -41,14 +41,14 @@ use AndyDefer\Task\Contracts\Services\UniqueTaskServiceInterface;
 use AndyDefer\Task\Repositories\RecurringTaskRepository;
 use AndyDefer\Task\Repositories\UniqueTaskRepository;
 use AndyDefer\Task\ValueObjects\TaskAliasVO;
-use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\View;
 use Ramsey\Uuid\Uuid;
 
 final class NotificationServiceTest extends TestCase
 {
-    use DatabaseMigrations;
+    use RefreshDatabase;
 
     private NotificationServiceInterface $service;
 
@@ -65,8 +65,6 @@ final class NotificationServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->runDatabaseMigrations();
 
         // ✅ Ajout du namespace pour les vues de test (fait une seule fois)
         View::addNamespace('test', __DIR__.'/../../Fixtures/resources/views');

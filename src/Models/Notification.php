@@ -101,6 +101,7 @@ final class Notification extends Model
         'status' => NotificationStatus::class,
         'sent_at' => 'datetime',
         'read_at' => 'datetime',
+
     ];
 
     /**

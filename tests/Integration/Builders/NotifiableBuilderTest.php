@@ -22,14 +22,14 @@ use AndyDefer\Repository\Records\FindByRecord;
 use AndyDefer\Task\Repositories\RecurringTaskRepository;
 use AndyDefer\Task\Repositories\UniqueTaskRepository;
 use AndyDefer\Task\ValueObjects\TaskAliasVO;
-use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\View;
 use InvalidArgumentException;
 
 final class NotifiableBuilderTest extends TestCase
 {
-    use DatabaseMigrations;
+    use RefreshDatabase;
 
     private NotificationServiceInterface $service;
 
@@ -40,8 +40,6 @@ final class NotifiableBuilderTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->runDatabaseMigrations();
 
         View::addNamespace('test', __DIR__.'/../../Fixtures/resources/views');
 

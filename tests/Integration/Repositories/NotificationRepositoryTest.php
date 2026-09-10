@@ -392,6 +392,8 @@ final class NotificationRepositoryTest extends TestCase
         $pendingCount = $this->repository->countByStatus($this->user, NotificationStatus::PENDING);
         $sentCount = $this->repository->countByStatus($this->user, NotificationStatus::SENT);
 
+        $notif = action_normalizer_chain(true)->normalize(Notification::first());
+
         // Assert : Verify counts are correct
         $this->assertEquals(1, $pendingCount);
         $this->assertEquals(1, $sentCount);

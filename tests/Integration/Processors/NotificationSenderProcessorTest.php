@@ -26,12 +26,12 @@ use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\Repository\Records\FindByRecord;
-use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 
 final class NotificationSenderProcessorTest extends TestCase
 {
-    use DatabaseMigrations;
+    use RefreshDatabase;
 
     private NotificationSenderProcessor $processor;
 
@@ -44,8 +44,6 @@ final class NotificationSenderProcessorTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->runDatabaseMigrations();
 
         $this->processor = app(NotificationSenderProcessor::class);
         $this->repository = app(NotificationRepository::class);

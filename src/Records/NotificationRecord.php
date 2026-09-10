@@ -11,7 +11,7 @@ use AndyDefer\LaravelNotification\ValueObjects\ErrorMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\FqcnChannelVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\UuidVO;
-use AndyDefer\PhpVo\ValueObjects\DateTimeVO;
+use AndyDefer\PhpVo\ValueObjects\DateTimeZuluVO;
 
 final class NotificationRecord extends AbstractRecord
 {
@@ -26,10 +26,10 @@ final class NotificationRecord extends AbstractRecord
         public readonly ?StrictDataObject $metadata = null, // ✅ NOUVEAU
         public readonly ?NotificationStatus $status = NotificationStatus::PENDING,
         public readonly ?ErrorMessageVO $error = null,
-        public readonly ?DateTimeVO $sent_at = null,
-        public readonly ?DateTimeVO $read_at = null,
-        public readonly ?DateTimeVO $created_at = null,
-        public readonly ?DateTimeVO $updated_at = null,
-        public readonly ?DateTimeVO $deleted_at = null,
+        public readonly ?DateTimeZuluVO $sent_at = null,
+        public readonly ?DateTimeZuluVO $read_at = null,
+        public readonly ?DateTimeZuluVO $created_at = null,
+        public readonly ?DateTimeZuluVO $updated_at = null,
+        public readonly ?DateTimeZuluVO $deleted_at = null,
     ) {}
 }

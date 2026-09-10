@@ -9,7 +9,7 @@ namespace AndyDefer\LaravelNotification\Datas;
 use AndyDefer\DomainStructures\Abstracts\AbstractData;
 use AndyDefer\DomainStructures\Utils\StrictAssociative;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
-use AndyDefer\PhpVo\ValueObjects\DateTimeVO;
+use AndyDefer\PhpVo\ValueObjects\DateTimeZuluVO;
 
 /**
  * Data Transfer Object for a notification.
@@ -29,9 +29,9 @@ final class NotificationData extends AbstractData
         public readonly ?StrictAssociative $metadata,
         public readonly NotificationStatus $status,
         public readonly ?string $error,
-        public readonly ?DateTimeVO $sentAt,
-        public readonly ?DateTimeVO $readAt,
-        public readonly DateTimeVO $createdAt,
-        public readonly ?DateTimeVO $updatedAt,
+        public readonly ?DateTimeZuluVO $sentAt,
+        public readonly ?DateTimeZuluVO $readAt,
+        public readonly DateTimeZuluVO $createdAt,
+        public readonly ?DateTimeZuluVO $updatedAt,
     ) {}
 }

@@ -14,9 +14,7 @@ use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use Illuminate\Support\Facades\Mail;
-use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 
-#[AllowMockObjectsWithoutExpectations]
 final class MailDriverTest extends TestCase
 {
     private MailDriver $driver;
@@ -47,6 +45,7 @@ final class MailDriverTest extends TestCase
     private function getLogContent(): string
     {
         $logPath = storage_path('logs/test.log');
+
         if (! file_exists($logPath)) {
             return '';
         }
