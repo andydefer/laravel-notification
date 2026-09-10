@@ -853,4 +853,190 @@ final class HasNotificationsTest extends TestCase
         $this->assertCount(1, $this->user->latest_database_notifications);
         $this->assertCount(1, $otherUser->latest_database_notifications);
     }
+
+    // ============================================================================
+    // Tests - unread_database_notifications_count
+    // ============================================================================
+
+    public function test_unread_database_notifications_count_returns_zero_when_none(): void
+    {
+        $this->assertEquals(0, $this->user->unread_database_notifications_count);
+    }
+
+    public function test_unread_database_notifications_count_returns_only_unread_database(): void
+    {
+        // Arrange : Create 2 unread database notifications
+        for ($i = 0; $i < 2; $i++) {
+            Notification::factory()
+                ->channel(DatabaseChannel::class)
+                ->to('database')
+                ->state([
+                    'session_id' => UuidVO::generate()->getValue(),
+                    'notifiable_type' => $this->user->getMorphClass(),
+                    'notifiable_id' => $this->user->getKey(),
+                    'message' => $this->createMessage()->toArray(),
+                    'read_at' => null,
+                ])
+                ->create();
+        }
+
+        // Arrange : Create 1 read database notification
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $this->createMessage()->toArray(),
+                'read_at' => now(),
+            ])
+            ->create();
+
+        // Arrange : Create 1 unread mail notification (should NOT be counted)
+        $this->createNotification();
+
+        $this->assertEquals(2, $this->user->unread_database_notifications_count);
+    }
+
+    // ============================================================================
+    // Tests - unread_database_notifications
+    // ============================================================================
+
+    public function test_unread_database_notifications_returns_empty_collection_when_none(): void
+    {
+        $result = $this->user->unread_database_notifications;
+
+        $this->assertCount(0, $result);
+    }
+
+    public function test_unread_database_notifications_returns_only_unread_database(): void
+    {
+        // Arrange : 2 unread database notifications
+        for ($i = 0; $i < 2; $i++) {
+            Notification::factory()
+                ->channel(DatabaseChannel::class)
+                ->to('database')
+                ->state([
+                    'session_id' => UuidVO::generate()->getValue(),
+                    'notifiable_type' => $this->user->getMorphClass(),
+                    'notifiable_id' => $this->user->getKey(),
+                    'message' => $this->createMessage()->toArray(),
+                    'read_at' => null,
+                ])
+                ->create();
+        }
+
+        // Arrange : 1 read database notification
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $this->createMessage()->toArray(),
+                'read_at' => now(),
+            ])
+            ->create();
+
+        // Arrange : 1 unread mail notification
+        $this->createNotification();
+
+        $result = $this->user->unread_database_notifications;
+
+        $this->assertCount(2, $result);
+        foreach ($result as $notification) {
+            $this->assertEquals(DatabaseChannel::class, $notification->channel);
+            $this->assertFalse($notification->isRead());
+        }
+    }
+
+    public function test_unread_database_notifications_are_scoped_to_user(): void
+    {
+        $otherUser = TestUser::create([
+            'name' => 'Jane Doe',
+            'email' => 'jane@example.com',
+        ]);
+
+        $message = $this->createMessage();
+
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $message->toArray(),
+                'read_at' => null,
+            ])
+            ->create();
+
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $otherUser->getMorphClass(),
+                'notifiable_id' => $otherUser->getKey(),
+                'message' => $message->toArray(),
+                'read_at' => null,
+            ])
+            ->create();
+
+        $this->assertCount(1, $this->user->unread_database_notifications);
+        $this->assertCount(1, $otherUser->unread_database_notifications);
+    }
+
+    // ============================================================================
+    // Tests - has_unread_database_notifications
+    // ============================================================================
+
+    public function test_has_unread_database_notifications_returns_true(): void
+    {
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $this->createMessage()->toArray(),
+                'read_at' => null,
+            ])
+            ->create();
+
+        $this->assertTrue($this->user->has_unread_database_notifications);
+    }
+
+    public function test_has_unread_database_notifications_returns_false_when_all_read(): void
+    {
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $this->createMessage()->toArray(),
+                'read_at' => now(),
+            ])
+            ->create();
+
+        $this->assertFalse($this->user->has_unread_database_notifications);
+    }
+
+    public function test_has_unread_database_notifications_returns_false_when_no_database_notifications(): void
+    {
+        // Mail notification only
+        $this->createNotification();
+
+        $this->assertFalse($this->user->has_unread_database_notifications);
+    }
+
+    public function test_has_unread_database_notifications_returns_false_when_no_notifications(): void
+    {
+        $this->assertFalse($this->user->has_unread_database_notifications);
+    }
 }

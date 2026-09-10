@@ -36,6 +36,9 @@ use Illuminate\Support\Collection;
  * @property-read Collection<int, Notification> $latest_notifications
  * @property-read Collection<int, Notification> $database_notifications
  * @property-read Collection<int, Notification> $latest_database_notifications
+ * @property-read int $unread_database_notifications_count
+ * @property-read Collection<int, Notification> $unread_database_notifications
+ * @property-read bool $has_unread_database_notifications
  * @property-read bool $has_unread_notifications
  * @property-read bool $has_notifications
  */
@@ -225,6 +228,62 @@ trait HasNotifications
         return Attribute::make(
             get: fn (): bool => $this->notificationRepository()->exists(
                 $this->notificationFilter()
+            ),
+        );
+    }
+
+    /**
+     * Get the unread database notifications count.
+     *
+     * @return Attribute<int, never>
+     */
+    protected function unreadDatabaseNotificationsCount(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): int => $this->notificationRepository()->count(
+                $this->notificationFilter([
+                    'channel' => DatabaseChannel::class,
+                    'read' => false,
+                ])
+            ),
+        );
+    }
+
+    /**
+     * Get all unread database notifications.
+     *
+     * Returns all notifications sent through the DatabaseChannel that are unread.
+     *
+     * @return Attribute<Collection<int, Notification>, never>
+     */
+    protected function unreadDatabaseNotifications(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): Collection => $this->notificationRepository()->findBy(
+                new FindByRecord(
+                    filters: $this->notificationFilter([
+                        'channel' => DatabaseChannel::class,
+                        'read' => false,
+                    ]),
+                    sortBy: new SortColumns('created_at:desc'),
+                )
+            ),
+        );
+    }
+
+    /**
+     * Check if the model has any unread database notifications.
+     *
+     * @return Attribute<bool, never>
+     */
+    protected function hasUnreadDatabaseNotifications(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): bool => $this->notificationRepository()->exists(
+                $this->notificationFilter([
+                    'channel' => DatabaseChannel::class,
+                    'read' => false,
+                ])
             ),
         );
     }
