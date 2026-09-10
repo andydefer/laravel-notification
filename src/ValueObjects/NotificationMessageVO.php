@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\ValueObjects;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractValueObject;
+use AndyDefer\DomainStructures\Utils\StrictAssociative;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 
 class NotificationMessageVO extends AbstractValueObject
@@ -92,8 +93,8 @@ class NotificationMessageVO extends AbstractValueObject
         return $this->data->get($key, $default);
     }
 
-    public function getValue(): string
+    public function getValue(): StrictAssociative
     {
-        return json_encode($this->toArray());
+        return StrictAssociative::from($this->toArray());
     }
 }
