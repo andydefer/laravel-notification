@@ -26,7 +26,7 @@ final class NotificationData extends AbstractData
         public readonly string $notifiableType,
         public readonly int $notifiableId,
         public readonly StrictAssociative $message,
-        public readonly StrictAssociative $metadata,
+        public readonly ?StrictAssociative $metadata,
         public readonly NotificationStatus $status,
         public readonly ?string $error,
         public readonly ?DateTimeVO $sentAt,

@@ -1,5 +1,6 @@
 <?php
 
+use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -16,8 +17,8 @@ return new class extends Migration
             $table->string('notifiable_type');
             $table->unsignedBigInteger('notifiable_id');
             $table->json('message');
-            $table->json('metadata')->nullable(); // ✅ NOUVEAU
-            $table->string('status')->default('pending');
+            $table->json('metadata')->nullable();
+            $table->string('status')->default(NotificationStatus::PENDING->value);
             $table->text('error')->nullable();
             $table->timestamp('sent_at')->nullable();
             $table->timestamp('read_at')->nullable();
