@@ -8,6 +8,7 @@ use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
+use AndyDefer\LaravelNotification\Collections\NotificationStatusCollection;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\Models\Notification;
 use AndyDefer\LaravelNotification\Records\NotificationFilterRecord;
@@ -737,5 +738,127 @@ final class NotificationRepositoryTest extends TestCase
         $this->assertEquals(MailChannel::class, $items[0]->channel);
         $this->assertEquals(MailChannel::class, $items[1]->channel);
         $this->assertEquals(MailChannel::class, $items[2]->channel);
+    }
+
+    public function test_find_by_with_multiple_statuses(): void
+    {
+        // Arrange : Create notifications with different statuses
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::DELIVERED);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::PENDING);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::FAILED);
+
+        $filter = NotificationFilterRecord::from([
+            'statuses' => NotificationStatusCollection::from([
+                NotificationStatus::SENT,
+                NotificationStatus::DELIVERED,
+            ]),
+        ]);
+
+        // Act
+        $results = $this->repository->findBy(
+            new FindByRecord(filters: $filter)
+        );
+
+        // Assert : SENT and DELIVERED only
+        $this->assertCount(2, $results);
+
+        foreach ($results as $result) {
+            $this->assertContains(
+                $result->getStatus(),
+                [NotificationStatus::SENT, NotificationStatus::DELIVERED]
+            );
+        }
+    }
+
+    public function test_find_by_merges_single_status_and_statuses_collection(): void
+    {
+        // Arrange
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::DELIVERED);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::FAILED);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::PENDING);
+
+        $filter = NotificationFilterRecord::from([
+            'status' => NotificationStatus::SENT,
+            'statuses' => NotificationStatusCollection::from([
+                NotificationStatus::DELIVERED,
+            ]),
+        ]);
+
+        // Act
+        $results = $this->repository->findBy(
+            new FindByRecord(filters: $filter)
+        );
+
+        // Assert : SENT (from single) + DELIVERED (from collection) = 2
+        $this->assertCount(2, $results);
+
+        foreach ($results as $result) {
+            $this->assertContains(
+                $result->getStatus(),
+                [NotificationStatus::SENT, NotificationStatus::DELIVERED]
+            );
+        }
+    }
+
+    public function test_find_by_deduplicates_overlapping_statuses(): void
+    {
+        // Arrange
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::DELIVERED);
+
+        // SENT présent à la fois dans status et statuses → doit être dédupliqué
+        $filter = NotificationFilterRecord::from([
+            'status' => NotificationStatus::SENT,
+            'statuses' => NotificationStatusCollection::from([
+                NotificationStatus::SENT,
+                NotificationStatus::DELIVERED,
+            ]),
+        ]);
+
+        // Act
+        $results = $this->repository->findBy(
+            new FindByRecord(filters: $filter)
+        );
+
+        // Assert : 2 résultats, pas de doublon
+        $this->assertCount(2, $results);
+    }
+
+    public function test_count_with_multiple_statuses(): void
+    {
+        // Arrange
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::DELIVERED);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::FAILED);
+
+        $filter = NotificationFilterRecord::from([
+            'statuses' => NotificationStatusCollection::from([
+                NotificationStatus::SENT,
+                NotificationStatus::DELIVERED,
+            ]),
+        ]);
+
+        // Act
+        $count = $this->repository->count($filter);
+
+        // Assert
+        $this->assertEquals(2, $count);
+    }
+
+    public function test_count_by_status_still_works_with_single_status(): void
+    {
+        // Arrange : verify backward compatibility of countByStatus
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::SENT);
+        $this->createNotification('test', $this->mailChannelVO, status: NotificationStatus::DELIVERED);
+
+        // Act
+        $sentCount = $this->repository->countByStatus($this->user, NotificationStatus::SENT);
+        $deliveredCount = $this->repository->countByStatus($this->user, NotificationStatus::DELIVERED);
+
+        // Assert
+        $this->assertEquals(1, $sentCount);
+        $this->assertEquals(1, $deliveredCount);
     }
 }

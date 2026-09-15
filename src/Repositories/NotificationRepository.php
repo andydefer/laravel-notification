@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Repositories;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
+use AndyDefer\LaravelNotification\Collections\NotificationStatusCollection;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\Models\Notification;
@@ -180,8 +181,10 @@ final class NotificationRepository extends AbstractRepository implements Notific
             $query->where('notifiable_id', $filters->notifiable_id);
         }
 
-        if ($filters->status !== null) {
-            $query->where('status', $filters->status->value);
+        $statusValues = $this->resolveStatusValues($filters);
+
+        if (! empty($statusValues)) {
+            $query->whereIn('status', $statusValues);
         }
 
         if ($filters->read !== null) {
@@ -191,5 +194,28 @@ final class NotificationRepository extends AbstractRepository implements Notific
                 $query->whereNull('read_at');
             }
         }
+    }
+
+    /**
+     * Resolve the list of statuses to filter on.
+     *
+     * Merges the single `status` field (for backward compatibility) with
+     * the optional `statuses` collection. Duplicate values are removed.
+     *
+     * @return array<int, string>
+     */
+    private function resolveStatusValues(NotificationFilterRecord $filters): array
+    {
+        $statuses = [];
+
+        if ($filters->status !== null) {
+            $statuses[] = $filters->status->value;
+        }
+
+        if ($filters->statuses instanceof NotificationStatusCollection && $filters->statuses->isNotEmpty()) {
+            $statuses = array_merge($statuses, $filters->statuses->toValues());
+        }
+
+        return array_values(array_unique($statuses));
     }
 }

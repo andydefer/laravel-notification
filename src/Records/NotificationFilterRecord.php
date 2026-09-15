@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Records;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
+use AndyDefer\LaravelNotification\Collections\NotificationStatusCollection;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\ValueObjects\FqcnChannelVO;
 use AndyDefer\LaravelNotification\ValueObjects\UuidVO;
@@ -18,6 +19,7 @@ final class NotificationFilterRecord extends AbstractRecord
         public readonly ?string $notifiable_type = null,
         public readonly ?int $notifiable_id = null,
         public readonly ?NotificationStatus $status = null,
+        public readonly ?NotificationStatusCollection $statuses = null,
         public readonly ?bool $read = null,
     ) {}
 }
