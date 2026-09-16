@@ -1,4 +1,4 @@
-```markdown
+
 # Laravel Notification
 
 **Système de notifications multi-canaux pour Laravel. Persistance, traçabilité, multiples destinations, planification avancée - avec une architecture extensible.**
