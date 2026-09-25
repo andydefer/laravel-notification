@@ -21,7 +21,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "andydefer/laravel-task": "^4.13.81",
+        "andydefer/laravel-task": "^4.13.82",
         "pusher/pusher-php-server": "^7.3"
     },
     "require-dev": {
