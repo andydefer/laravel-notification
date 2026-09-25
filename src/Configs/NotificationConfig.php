@@ -11,6 +11,7 @@ use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
 use AndyDefer\LaravelNotification\Records\DatabaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
 use AndyDefer\LaravelNotification\Records\PushConfigRecord;
+use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
 use AndyDefer\LaravelNotification\Records\SlackConfigRecord;
 use AndyDefer\LaravelNotification\Records\SmsConfigRecord;
 use AndyDefer\LaravelNotification\Records\TelegramConfigRecord;
@@ -71,6 +72,17 @@ final class NotificationConfig implements NotificationConfigInterface
         'apns_bundle_id' => null,
         'default_sound' => 'default',
         'default_tokens' => [],
+    ];
+
+    private const DEFAULT_PUSHER_CONFIG = [
+        'enabled' => false,
+        'app_id' => null,
+        'key' => null,
+        'secret' => null,
+        'cluster' => 'eu',
+        'use_tls' => true,
+        'timeout' => 30,
+        'default_channel' => 'notifications',
     ];
 
     private const DEFAULT_LOGGING_CONFIG = [
@@ -169,6 +181,16 @@ final class NotificationConfig implements NotificationConfigInterface
     /**
      * {@inheritDoc}
      */
+    public function getPusherConfig(): PusherConfigRecord
+    {
+        $config = $this->config->get('notification.channels.pusher', self::DEFAULT_PUSHER_CONFIG);
+
+        return PusherConfigRecord::from($config);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function isSmsEnabled(): bool
     {
         return $this->getSmsConfig()->enabled;
@@ -204,6 +226,14 @@ final class NotificationConfig implements NotificationConfigInterface
     public function isPushEnabled(): bool
     {
         return $this->getPushConfig()->enabled;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function isPusherEnabled(): bool
+    {
+        return $this->getPusherConfig()->enabled;
     }
 
     /**
@@ -256,6 +286,10 @@ final class NotificationConfig implements NotificationConfigInterface
 
         if ($this->isPushEnabled()) {
             $channels[] = 'push';
+        }
+
+        if ($this->isPusherEnabled()) {
+            $channels[] = 'pusher';
         }
 
         return $channels;

@@ -34,9 +34,6 @@ abstract class TestCase extends Orchestra
         \Mockery::close();
     }
 
-    /**
-     * Load test environment configuration from file or use defaults.
-     */
     protected function loadTestEnvironment(): void
     {
         $envFile = __DIR__.'/test_env.php';
@@ -48,36 +45,25 @@ abstract class TestCase extends Orchestra
         }
     }
 
-    /**
-     * Get default test environment variables.
-     *
-     * @return array<string, string> Default test environment variables
-     */
     protected function getDefaultTestEnvironment(): array
     {
         return [
-            // Mail
             'MAIL_FROM_ADDRESS' => 'noreply@test.com',
             'MAIL_FROM_NAME' => 'Test App',
             'MAIL_DEFAULT_TO' => 'test@example.com',
 
-            // SMS (Twilio)
             'TWILIO_SID' => 'ACtest123456789',
             'TWILIO_TOKEN' => 'testtoken123456789',
             'TWILIO_FROM' => '+1234567890',
 
-            // WhatsApp (Meta)
             'WHATSAPP_ACCESS_TOKEN' => 'test_access_token_123456789',
             'WHATSAPP_PHONE_NUMBER_ID' => '123456789012345',
 
-            // Slack - Faux webhook pour les tests
             'SLACK_WEBHOOK_URL' => 'https://hooks.slack.com/services/fake/fake/fake',
 
-            // Telegram
             'TELEGRAM_BOT_TOKEN' => '1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ',
             'TELEGRAM_CHAT_ID' => '-123456789',
 
-            // Push (FCM/APNS)
             'FCM_API_KEY' => 'AAAAtest123456789',
             'FCM_PROJECT_ID' => 'test-project-123456',
             'APNS_KEY_PATH' => '/path/to/apns/key.p8',
@@ -85,19 +71,19 @@ abstract class TestCase extends Orchestra
             'APNS_TEAM_ID' => 'ABCDEF1234',
             'APNS_BUNDLE_ID' => 'com.test.app',
 
-            // Logs
+            'PUSHER_APP_ID' => '123456',
+            'PUSHER_APP_KEY' => 'test-pusher-key',
+            'PUSHER_APP_SECRET' => 'test-pusher-secret',
+            'PUSHER_APP_CLUSTER' => 'eu',
+            'PUSHER_USE_TLS' => 'true',
+            'PUSHER_TIMEOUT' => '30',
+            'PUSHER_NOTIFICATION_CHANNEL' => 'notifications',
+
             'NOTIFICATION_LOG_CHANNEL' => 'daily',
             'NOTIFICATION_LOG_LEVEL' => 'debug',
         ];
     }
 
-    /**
-     * Get an environment variable from test configuration.
-     *
-     * @param  string  $key  The environment variable key
-     * @param  mixed  $default  Default value if key doesn't exist
-     * @return mixed The environment variable value
-     */
     protected function getEnv(string $key, mixed $default = null): mixed
     {
         return $this->testEnv[$key] ?? $default;
@@ -122,28 +108,22 @@ abstract class TestCase extends Orchestra
 
     protected function setUpEnvironmentVariables(): void
     {
-        // Mail
         putenv('MAIL_FROM_ADDRESS='.$this->getEnv('MAIL_FROM_ADDRESS'));
         putenv('MAIL_FROM_NAME='.$this->getEnv('MAIL_FROM_NAME'));
         putenv('MAIL_DEFAULT_TO='.$this->getEnv('MAIL_DEFAULT_TO'));
 
-        // SMS (Twilio)
         putenv('TWILIO_SID='.$this->getEnv('TWILIO_SID'));
         putenv('TWILIO_TOKEN='.$this->getEnv('TWILIO_TOKEN'));
         putenv('TWILIO_FROM='.$this->getEnv('TWILIO_FROM'));
 
-        // WhatsApp (Meta)
         putenv('WHATSAPP_ACCESS_TOKEN='.$this->getEnv('WHATSAPP_ACCESS_TOKEN'));
         putenv('WHATSAPP_PHONE_NUMBER_ID='.$this->getEnv('WHATSAPP_PHONE_NUMBER_ID'));
 
-        // Slack
         putenv('SLACK_WEBHOOK_URL='.$this->getEnv('SLACK_WEBHOOK_URL'));
 
-        // Telegram
         putenv('TELEGRAM_BOT_TOKEN='.$this->getEnv('TELEGRAM_BOT_TOKEN'));
         putenv('TELEGRAM_CHAT_ID='.$this->getEnv('TELEGRAM_CHAT_ID'));
 
-        // Push (FCM/APNS)
         putenv('FCM_API_KEY='.$this->getEnv('FCM_API_KEY'));
         putenv('FCM_PROJECT_ID='.$this->getEnv('FCM_PROJECT_ID'));
         putenv('APNS_KEY_PATH='.$this->getEnv('APNS_KEY_PATH'));
@@ -151,11 +131,17 @@ abstract class TestCase extends Orchestra
         putenv('APNS_TEAM_ID='.$this->getEnv('APNS_TEAM_ID'));
         putenv('APNS_BUNDLE_ID='.$this->getEnv('APNS_BUNDLE_ID'));
 
-        // Logs
+        putenv('PUSHER_APP_ID='.$this->getEnv('PUSHER_APP_ID'));
+        putenv('PUSHER_APP_KEY='.$this->getEnv('PUSHER_APP_KEY'));
+        putenv('PUSHER_APP_SECRET='.$this->getEnv('PUSHER_APP_SECRET'));
+        putenv('PUSHER_APP_CLUSTER='.$this->getEnv('PUSHER_APP_CLUSTER'));
+        putenv('PUSHER_USE_TLS='.$this->getEnv('PUSHER_USE_TLS'));
+        putenv('PUSHER_TIMEOUT='.$this->getEnv('PUSHER_TIMEOUT'));
+        putenv('PUSHER_NOTIFICATION_CHANNEL='.$this->getEnv('PUSHER_NOTIFICATION_CHANNEL'));
+
         putenv('NOTIFICATION_LOG_CHANNEL='.$this->getEnv('NOTIFICATION_LOG_CHANNEL'));
         putenv('NOTIFICATION_LOG_LEVEL='.$this->getEnv('NOTIFICATION_LOG_LEVEL'));
 
-        // Rendre les variables disponibles dans $_ENV
         foreach ($this->testEnv as $key => $value) {
             $_ENV[$key] = $value;
         }
@@ -165,7 +151,6 @@ abstract class TestCase extends Orchestra
     {
         $config = $this->app['config'];
 
-        // Notification channels
         $config->set('notification.channels.mail', [
             'enabled' => true,
             'driver' => 'mail',
@@ -213,6 +198,17 @@ abstract class TestCase extends Orchestra
             'default_tokens' => [],
         ]);
 
+        $config->set('notification.channels.pusher', [
+            'enabled' => true,
+            'app_id' => $this->getEnv('PUSHER_APP_ID', '2197533'),
+            'key' => $this->getEnv('PUSHER_APP_KEY', 'f1bc1733c3f2f2e30cdd'),
+            'secret' => $this->getEnv('PUSHER_APP_SECRET', '2613a0ff0eddf57f8d6f'),
+            'cluster' => $this->getEnv('PUSHER_APP_CLUSTER', 'ap2'),
+            'use_tls' => filter_var($this->getEnv('PUSHER_USE_TLS', 'true'), FILTER_VALIDATE_BOOLEAN),
+            'timeout' => (int) $this->getEnv('PUSHER_TIMEOUT', '30'),
+            'default_channel' => $this->getEnv('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
+        ]);
+
         $config->set('notification.channels.database', [
             'driver' => 'database',
             'table' => 'notifications',
@@ -237,14 +233,12 @@ abstract class TestCase extends Orchestra
             'foreign_key_constraints' => false,
         ]);
 
-        // Configurer le mailer pour utiliser le driver 'log'
         $app['config']->set('mail.default', 'log');
         $app['config']->set('mail.mailers.log', [
             'transport' => 'log',
             'channel' => 'single',
         ]);
 
-        // Configuration des logs
         $app['config']->set('logging.default', 'stack');
         $app['config']->set('logging.channels.stack', [
             'driver' => 'stack',
@@ -256,50 +250,6 @@ abstract class TestCase extends Orchestra
             'level' => 'debug',
         ]);
     }
-
-    /* protected function defineEnvironment($app): void
-    {
-
-        $app['config']->set('database.default', 'mysql');
-        $app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'laravel_task_test',
-            'username' => 'test',
-            'password' => 'Test@2026#Secure',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '',
-            'strict' => true,
-            'engine' => null,
-        ]);
-
-        $app['config']->set('cache.default', 'array');
-        $app['config']->set('session.driver', 'array');
-        $app['config']->set('queue.default', 'sync');
-
-        $app['config']->set('task.storage_path', sys_get_temp_dir().'/task_tests_'.uniqid());
-
-        // Configurer le mailer pour utiliser le driver 'log'
-        $app['config']->set('mail.default', 'log');
-        $app['config']->set('mail.mailers.log', [
-            'transport' => 'log',
-            'channel' => 'single',
-        ]);
-
-        // Configuration des logs
-        $app['config']->set('logging.default', 'stack');
-        $app['config']->set('logging.channels.stack', [
-            'driver' => 'stack',
-            'channels' => ['single'],
-        ]);
-        $app['config']->set('logging.channels.single', [
-            'driver' => 'single',
-            'path' => storage_path('logs/test.log'),
-            'level' => 'debug',
-        ]);
-    } */
 
     protected function loadMigrations(): void
     {

@@ -44,6 +44,16 @@ return [
             'default_to' => env('MAIL_DEFAULT_TO'),
         ],
 
+        'pusher' => [
+            'enabled' => env('PUSHER_NOTIFICATION_ENABLED', false),
+            'app_id' => env('PUSHER_APP_ID'),
+            'key' => env('PUSHER_APP_KEY'),
+            'secret' => env('PUSHER_APP_SECRET'),
+            'cluster' => env('PUSHER_APP_CLUSTER', 'eu'),
+            'use_tls' => env('PUSHER_USE_TLS', true),
+            'timeout' => env('PUSHER_TIMEOUT', 30),
+            'default_channel' => env('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
+        ],
         /*
         |--------------------------------------------------------------------------
         | Database Channel

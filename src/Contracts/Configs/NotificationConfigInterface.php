@@ -9,6 +9,7 @@ namespace AndyDefer\LaravelNotification\Contracts\Configs;
 use AndyDefer\LaravelNotification\Records\DatabaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
 use AndyDefer\LaravelNotification\Records\PushConfigRecord;
+use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
 use AndyDefer\LaravelNotification\Records\SlackConfigRecord;
 use AndyDefer\LaravelNotification\Records\SmsConfigRecord;
 use AndyDefer\LaravelNotification\Records\TelegramConfigRecord;
@@ -79,6 +80,13 @@ interface NotificationConfigInterface
     public function getPushConfig(): PushConfigRecord;
 
     /**
+     * Get the Pusher channel configuration.
+     *
+     * @return PusherConfigRecord The Pusher configuration
+     */
+    public function getPusherConfig(): PusherConfigRecord;
+
+    /**
      * Check if SMS channel is enabled.
      *
      * @return bool True if SMS is enabled, false otherwise
@@ -112,6 +120,13 @@ interface NotificationConfigInterface
      * @return bool True if Push is enabled, false otherwise
      */
     public function isPushEnabled(): bool;
+
+    /**
+     * Check if Pusher channel is enabled.
+     *
+     * @return bool True if Pusher is enabled, false otherwise
+     */
+    public function isPusherEnabled(): bool;
 
     /**
      * Get the logging configuration.
