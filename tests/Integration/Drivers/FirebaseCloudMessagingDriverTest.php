@@ -16,7 +16,7 @@ use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 
 final class FirebaseCloudMessagingDriverTest extends TestCase
 {
-    private const DEVICE_TOKEN = 'ejK3-OvYhYb7a_Ci5ZJimM:APA91bEm9P-qhuM2gd_G22QXC4l7bCvm6dXcJmPTXt5TKuIW7X6enUd3ec77OP0mtz8Ow5A28IVHBMqaLT4bx_NS-Nxn6avQM0scEcWohxkSCuMBkZOPgfA';
+    private string $deviceToken;
 
     private FirebaseCloudMessagingDriver $driver;
 
@@ -27,6 +27,8 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->deviceToken = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
 
         $this->config = new FirebaseConfigRecord(
             enabled: true,
@@ -40,7 +42,7 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
 
         $this->route = new NotificationRouteVO(
             channelClass: FirebaseCloudMessagingChannel::class,
-            destination: self::DEVICE_TOKEN,
+            destination: $this->deviceToken,
             metadata: new StrictDataObject([
                 'title' => 'Test Title',
                 'data' => ['screen' => 'profile', 'user_id' => '42'],
@@ -136,7 +138,7 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
             $result->error_message?->getValue() ?? 'unknown error',
         ));
         $this->assertEquals(FirebaseCloudMessagingChannel::class, $result->channel->getValue());
-        $this->assertEquals(self::DEVICE_TOKEN, $result->destination);
+        $this->assertEquals($this->deviceToken, $result->destination);
         $this->assertNull($result->error_message);
     }
 
@@ -144,7 +146,7 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
     {
         $route = new NotificationRouteVO(
             channelClass: FirebaseCloudMessagingChannel::class,
-            destination: self::DEVICE_TOKEN,
+            destination: $this->deviceToken,
             metadata: new StrictDataObject([
                 'title' => 'Metadata Title',
                 'data' => [

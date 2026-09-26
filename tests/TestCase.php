@@ -164,6 +164,16 @@ abstract class TestCase extends Orchestra
             'default_from_name' => $this->getEnv('MAIL_FROM_NAME', 'Test App'),
         ]);
 
+        $config->set('notification.channels.firebase', [
+            'enabled' => filter_var(
+                $this->getEnv('FIREBASE_NOTIFICATION_ENABLED', 'true'),
+                FILTER_VALIDATE_BOOLEAN,
+            ),
+            'credentials_path' => $this->getEnv('FIREBASE_CREDENTIALS_PATH'),
+            'project_id' => $this->getEnv('FIREBASE_PROJECT_ID'),
+            'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+            'timeout' => (int) $this->getEnv('FIREBASE_TIMEOUT', '30'),
+        ]);
         $config->set('notification.channels.sms', [
             'enabled' => true,
             'driver' => 'twilio',

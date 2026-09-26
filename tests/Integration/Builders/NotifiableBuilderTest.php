@@ -6,7 +6,9 @@ namespace AndyDefer\LaravelNotification\Tests\Integration\Builders;
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
+use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
+use AndyDefer\LaravelNotification\Channels\PusherChannel;
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Options\SendOptions;
@@ -18,6 +20,7 @@ use AndyDefer\LaravelNotification\Tests\Fixtures\Models\TestUser;
 use AndyDefer\LaravelNotification\Tests\TestCase;
 use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
+use AndyDefer\LaravelNotification\ValueObjects\PusherChannelNameVO;
 use AndyDefer\Repository\Records\FindByRecord;
 use AndyDefer\Task\Repositories\RecurringTaskRepository;
 use AndyDefer\Task\Repositories\UniqueTaskRepository;
@@ -947,5 +950,210 @@ final class NotifiableBuilderTest extends TestCase
         $this->assertTrue($result->success);
         $this->assertEquals(TestChannel::class, $result->channel->getValue());
         $this->assertEquals('test_destination', $result->destination);
+    }
+
+    // ============================================================================
+    // Firebase Cloud Messaging
+    // ============================================================================
+
+    public function test_send_now_with_firebase_channel(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        $results = NotifiableBuilder::create()
+            ->to(FirebaseCloudMessagingChannel::class, $token)
+            ->subject('Firebase Test')
+            ->body('Body from builder')
+            ->type('firebase_test')
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertCount(1, $results);
+        $this->assertTrue($results->allSuccess(), sprintf(
+            'Firebase send failed: %s',
+            $results->first()->error_message?->getValue() ?? 'unknown error',
+        ));
+
+        $result = $results->first();
+        $this->assertEquals(FirebaseCloudMessagingChannel::class, $result->channel->getValue());
+        $this->assertEquals($token, $result->destination);
+    }
+
+    public function test_send_now_with_firebase_channel_and_metadata(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        $results = NotifiableBuilder::create()
+            ->to(FirebaseCloudMessagingChannel::class, $token)
+            ->subject('Fallback subject')
+            ->body('Body from builder')
+            ->type('firebase_test')
+            ->metadata(FirebaseCloudMessagingChannel::class, new StrictDataObject([
+                'title' => 'Custom Title',
+                'data' => ['screen' => 'orders', 'order_id' => '99'],
+            ]))
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertTrue($results->allSuccess(), sprintf(
+            'Firebase send failed: %s',
+            $results->first()->error_message?->getValue() ?? 'unknown error',
+        ));
+    }
+
+    public function test_send_now_with_firebase_multiple_tokens(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        $results = NotifiableBuilder::create()
+            ->to(FirebaseCloudMessagingChannel::class, [$token, $token])
+            ->subject('Firebase Multi')
+            ->body('Body from builder')
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertCount(2, $results);
+    }
+
+    public function test_send_later_with_firebase_channel(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        $alias = NotifiableBuilder::create()
+            ->to(FirebaseCloudMessagingChannel::class, $token)
+            ->subject('Firebase Later')
+            ->body('Body from builder')
+            ->sendLater(300);
+
+        $this->assertInstanceOf(TaskAliasVO::class, $alias);
+
+        $task = app(UniqueTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+        $this->assertEquals(
+            $frozenNow->copy()->addSeconds(300)->toIso8601String(),
+            $task->getScheduledAt()->toIso8601(),
+        );
+    }
+
+    // ============================================================================
+    // Pusher
+    // ============================================================================
+
+    public function test_send_now_with_pusher_channel(): void
+    {
+        $user = TestUser::create(['name' => 'Pusher']);
+
+        $channel = PusherChannelNameVO::forModel($user)->getValue();
+
+        $results = NotifiableBuilder::create()
+            ->to(PusherChannel::class, $channel)
+            ->subject('Pusher Test')
+            ->body('Body from builder')
+            ->type('pusher_test')
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertCount(1, $results);
+        $this->assertTrue($results->allSuccess(), sprintf(
+            'Pusher send failed: %s',
+            $results->first()->error_message?->getValue() ?? 'unknown error',
+        ));
+
+        $result = $results->first();
+        $this->assertEquals(PusherChannel::class, $result->channel->getValue());
+        $this->assertEquals($channel, $result->destination);
+    }
+
+    public function test_send_now_with_pusher_channel_and_metadata(): void
+    {
+        $user = TestUser::create(['name' => 'Pusher']);
+        $channel = PusherChannelNameVO::forModel($user)->getValue();
+
+        $results = NotifiableBuilder::create()
+            ->to(PusherChannel::class, $channel)
+            ->subject('Pusher Event')
+            ->body('Body from builder')
+            ->type('pusher_test')
+            ->metadata(PusherChannel::class, new StrictDataObject([
+                'channel' => $channel,
+                'event' => 'custom_event',
+            ]))
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertTrue($results->allSuccess(), sprintf(
+            'Pusher send failed: %s',
+            $results->first()->error_message?->getValue() ?? 'unknown error',
+        ));
+    }
+
+    public function test_send_now_with_pusher_and_firebase_together(): void
+    {
+        $user = TestUser::create(['name' => 'Mixed']);
+        $channel = PusherChannelNameVO::forModel($user)->getValue();
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        $results = NotifiableBuilder::create()
+            ->to(PusherChannel::class, $channel)
+            ->to(FirebaseCloudMessagingChannel::class, $token)
+            ->subject('Mixed Channels')
+            ->body('Body from builder')
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertCount(2, $results);
+
+        $channels = $results->map(fn ($r) => $r->channel->getValue())->toArray();
+        $this->assertContains(PusherChannel::class, $channels);
+        $this->assertContains(FirebaseCloudMessagingChannel::class, $channels);
+    }
+
+    public function test_send_later_with_pusher_channel(): void
+    {
+        $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
+        Carbon::setTestNow($frozenNow);
+
+        $user = TestUser::create(['name' => 'Pusher']);
+        $channel = PusherChannelNameVO::forModel($user)->getValue();
+
+        $alias = NotifiableBuilder::create()
+            ->to(PusherChannel::class, $channel)
+            ->subject('Pusher Later')
+            ->body('Body from builder')
+            ->sendLater(300);
+
+        $this->assertInstanceOf(TaskAliasVO::class, $alias);
+
+        $task = app(UniqueTaskRepository::class)->findByAlias($alias);
+        $this->assertNotNull($task);
+        $this->assertEquals(
+            $frozenNow->copy()->addSeconds(300)->toIso8601String(),
+            $task->getScheduledAt()->toIso8601(),
+        );
+    }
+
+    public function test_send_now_with_pusher_and_custom_event(): void
+    {
+        $user = TestUser::create(['name' => 'Pusher']);
+        $channel = PusherChannelNameVO::forModel($user)->getValue();
+
+        $results = NotifiableBuilder::create()
+            ->to(PusherChannel::class, $channel)
+            ->subject('Custom Event')
+            ->body('Body from builder')
+            ->metadata(PusherChannel::class, new StrictDataObject([
+                'channel' => $channel,
+                'event' => 'orders.created',
+            ]))
+            ->sendNow();
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+        $this->assertTrue($results->allSuccess(), sprintf(
+            'Pusher send failed: %s',
+            $results->first()->error_message?->getValue() ?? 'unknown error',
+        ));
     }
 }

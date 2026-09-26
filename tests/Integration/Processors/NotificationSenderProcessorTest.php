@@ -6,11 +6,13 @@ namespace AndyDefer\LaravelNotification\Tests\Integration\Processors;
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
+use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Collections\FqcnChannelCollection;
 use AndyDefer\LaravelNotification\Collections\SendResultCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
+use AndyDefer\LaravelNotification\Models\FcmDevice;
 use AndyDefer\LaravelNotification\Models\Notification;
 use AndyDefer\LaravelNotification\Processors\NotificationSenderProcessor;
 use AndyDefer\LaravelNotification\Records\NotificationFilterRecord;
@@ -101,8 +103,8 @@ final class NotificationSenderProcessorTest extends TestCase
         $results = $this->processor->send($this->user, $this->message, $processRecord);
 
         $this->assertInstanceOf(SendResultCollection::class, $results);
-        // ✅ TestUser a : TestChannel + Mail + Database + TestChannel (phone) = 4 canaux
-        $this->assertCount(4, $results);
+        // ✅ TestUser a : TestChannel + Mail + Database + TestChannel (phone) + Pusher = 5 canaux
+        $this->assertCount(5, $results);
 
         foreach ($results as $result) {
             $this->assertInstanceOf(SendResultRecord::class, $result);
@@ -110,7 +112,7 @@ final class NotificationSenderProcessorTest extends TestCase
         }
 
         $notifications = $this->getNotificationsForNotifiable($this->user);
-        $this->assertCount(4, $notifications);
+        $this->assertCount(5, $notifications);
 
         foreach ($notifications as $notification) {
             $this->assertEquals(NotificationStatus::SENT, $notification->status);
@@ -284,7 +286,6 @@ final class NotificationSenderProcessorTest extends TestCase
 
     public function test_send_with_destination_filter_multiple_channels(): void
     {
-
         $doctor = TestDoctor::create([
             'name' => 'Dr. MultiChannel',
             'primary_email' => 'multi@clinic.com',
@@ -293,7 +294,6 @@ final class NotificationSenderProcessorTest extends TestCase
             'specialty' => 'Pediatrics',
         ]);
 
-        // ✅ Mail Channel uniquement (pas de SMS)
         $channels = new FqcnChannelCollection;
         $channels->add(new FqcnChannelVO(MailChannel::class));
 
@@ -313,7 +313,7 @@ final class NotificationSenderProcessorTest extends TestCase
         );
 
         $this->assertInstanceOf(SendResultCollection::class, $results);
-        $this->assertCount(2, $results); // ✅ 2 emails uniquement
+        $this->assertCount(2, $results);
 
         foreach ($results as $result) {
             $this->assertTrue($result->success);
@@ -608,10 +608,9 @@ final class NotificationSenderProcessorTest extends TestCase
         $results = $this->processor->send($user, $this->message, $processRecord);
 
         $this->assertInstanceOf(SendResultCollection::class, $results);
-        // ✅ TestUser a : TestChannel + Database = 2 canaux
-        $this->assertCount(2, $results);
+        // ✅ TestUser a : TestChannel + Database + Pusher = 3 canaux
+        $this->assertCount(3, $results);
 
-        // ✅ Filtrer pour trouver DatabaseChannel
         $databaseResult = $results->filter(function ($result) {
             return $result->channel->getValue() === DatabaseChannel::class;
         })->first();
@@ -621,9 +620,8 @@ final class NotificationSenderProcessorTest extends TestCase
         $this->assertEquals('database', $databaseResult->destination);
 
         $notifications = $this->getNotificationsForNotifiable($user);
-        $this->assertCount(2, $notifications);
+        $this->assertCount(3, $notifications);
 
-        // ✅ Vérifier qu'il y a une notification DatabaseChannel
         $databaseNotification = $notifications->filter(function ($notification) {
             return $notification->channel === DatabaseChannel::class;
         })->first();
@@ -704,5 +702,200 @@ final class NotificationSenderProcessorTest extends TestCase
         foreach ($notifications as $notification) {
             $this->assertEquals(NotificationStatus::SENT, $notification->status);
         }
+    }
+
+    // ==================== TESTS: FCM Devices ====================
+
+    public function test_send_adds_fcm_route_per_device(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        $processRecord = new ProcessNotificationRecord;
+
+        $results = $this->processor->send($this->user, $this->message, $processRecord);
+
+        $this->assertInstanceOf(SendResultCollection::class, $results);
+
+        $channels = $results->map(fn ($r) => $r->channel->getValue())->toArray();
+        $this->assertContains(FirebaseCloudMessagingChannel::class, $channels);
+
+        $fcmResults = $results->filter(fn ($r) => $r->channel->getValue() === FirebaseCloudMessagingChannel::class);
+        $this->assertCount(1, $fcmResults);
+
+        $fcmResult = $fcmResults->first();
+        $this->assertTrue($fcmResult->success, sprintf(
+            'FCM send failed: %s',
+            $fcmResult->error_message?->getValue() ?? 'unknown error',
+        ));
+        $this->assertEquals($token, $fcmResult->destination);
+    }
+
+    public function test_send_adds_multiple_fcm_routes_for_multiple_devices(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        // Token distinct valide selon FirebaseCloudMessagingChannel::validateDestination()
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440001',
+            'token' => 'second-'.$token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        $channels = new FqcnChannelCollection;
+        $channels->add(new FqcnChannelVO(FirebaseCloudMessagingChannel::class));
+
+        $processRecord = new ProcessNotificationRecord(channels: $channels);
+
+        $results = $this->processor->send($this->user, $this->message, $processRecord);
+
+        $fcmResults = $results->filter(fn ($r) => $r->channel->getValue() === FirebaseCloudMessagingChannel::class);
+        $this->assertCount(2, $fcmResults);
+    }
+
+    public function test_send_with_fcm_channel_filter_only(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        $channels = new FqcnChannelCollection;
+        $channels->add(new FqcnChannelVO(FirebaseCloudMessagingChannel::class));
+
+        $processRecord = new ProcessNotificationRecord(channels: $channels);
+
+        $results = $this->processor->send($this->user, $this->message, $processRecord);
+
+        $this->assertCount(1, $results);
+        $this->assertTrue($results->first()->success);
+        $this->assertEquals(FirebaseCloudMessagingChannel::class, $results->first()->channel->getValue());
+        $this->assertEquals($token, $results->first()->destination);
+    }
+
+    public function test_send_with_fcm_destination_filter(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        $channels = new FqcnChannelCollection;
+        $channels->add(new FqcnChannelVO(FirebaseCloudMessagingChannel::class));
+
+        $processRecord = new ProcessNotificationRecord(channels: $channels);
+
+        $destinationFilters = [
+            FirebaseCloudMessagingChannel::class => [$token],
+        ];
+
+        $results = $this->processor->send(
+            $this->user,
+            $this->message,
+            $processRecord,
+            $destinationFilters,
+        );
+
+        $this->assertCount(1, $results);
+        $this->assertEquals($token, $results->first()->destination);
+    }
+
+    public function test_send_with_fcm_limit_per_channel(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440001',
+            'token' => 'second-'.$token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        $channels = new FqcnChannelCollection;
+        $channels->add(new FqcnChannelVO(FirebaseCloudMessagingChannel::class));
+
+        $processRecord = new ProcessNotificationRecord(
+            channels: $channels,
+            limit_per_channel: 1,
+        );
+
+        $results = $this->processor->send($this->user, $this->message, $processRecord);
+
+        $this->assertCount(1, $results);
+        $this->assertEquals(FirebaseCloudMessagingChannel::class, $results->first()->channel->getValue());
+    }
+
+    public function test_send_persists_fcm_notification_with_sent_status(): void
+    {
+        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
+
+        FcmDevice::create([
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => (string) $this->user->getKey(),
+            'last_seen_at' => now(),
+        ]);
+
+        $channels = new FqcnChannelCollection;
+        $channels->add(new FqcnChannelVO(FirebaseCloudMessagingChannel::class));
+
+        $processRecord = new ProcessNotificationRecord(channels: $channels);
+
+        $this->processor->send($this->user, $this->message, $processRecord);
+
+        $notifications = $this->getNotificationsForNotifiable($this->user)
+            ->filter(fn ($n) => $n->channel === FirebaseCloudMessagingChannel::class);
+
+        $this->assertCount(1, $notifications);
+
+        $notification = $notifications->first();
+        $this->assertEquals(NotificationStatus::SENT, $notification->status);
+        $this->assertEquals($token, $notification->destination);
+        $this->assertNotNull($notification->sent_at);
     }
 }

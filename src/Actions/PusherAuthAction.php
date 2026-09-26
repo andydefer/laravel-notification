@@ -10,6 +10,7 @@ use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
 use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
 use AndyDefer\LaravelNotification\Datas\PusherAuthData;
 use AndyDefer\LaravelNotification\Records\PusherAuthRecord;
+use AndyDefer\LaravelNotification\ValueObjects\PusherChannelNameVO;
 use AndyDefer\Nemesis\Enums\ErrorCode;
 use AndyDefer\Nemesis\Helpers\NemesisHelper;
 use Illuminate\Database\Eloquent\Model;
@@ -36,12 +37,18 @@ final class PusherAuthAction extends AbstractAction
             return ErrorCode::AUTHENTICATABLE_NOT_FOUND->toJsonResponseFactory();
         }
 
-        if (! $this->isChannelAllowedForUser($request->channel_name, $user)) {
+        try {
+            $channel = new PusherChannelNameVO($request->channel_name);
+        } catch (\InvalidArgumentException) {
+            return ErrorCode::ORIGIN_NOT_ALLOWED->toJsonResponseFactory('Forbidden channel');
+        }
+
+        if (! $channel->belongsTo($user)) {
             return ErrorCode::ORIGIN_NOT_ALLOWED->toJsonResponseFactory('Forbidden channel');
         }
 
         try {
-            $auth = $this->authorizeChannel($request->channel_name, $request->socket_id);
+            $auth = $this->authorizeChannel($channel, $request->socket_id);
         } catch (PusherException) {
             return ErrorCode::INVALID_TOKEN->toJsonResponseFactory('Pusher authentication failed');
         }
@@ -49,7 +56,7 @@ final class PusherAuthAction extends AbstractAction
         return ResponseFactory::json($auth);
     }
 
-    private function authorizeChannel(string $channelName, string $socketId): PusherAuthData
+    private function authorizeChannel(PusherChannelNameVO $channel, string $socketId): PusherAuthData
     {
         $config = $this->notificationConfig->getPusherConfig();
 
@@ -65,7 +72,7 @@ final class PusherAuthAction extends AbstractAction
         );
 
         $payload = json_decode(
-            $pusher->authorizeChannel($channelName, $socketId),
+            $pusher->authorizeChannel($channel->getValue(), $socketId),
             true,
             flags: JSON_THROW_ON_ERROR,
         );
@@ -76,32 +83,5 @@ final class PusherAuthAction extends AbstractAction
                 ? (string) $payload['channel_data']
                 : null,
         ]);
-    }
-
-    private function isChannelAllowedForUser(string $channelName, Model $user): bool
-    {
-        $morphType = $user->getMorphClass();
-        $key = $user->getKey();
-
-        if ($key === null || $morphType === '') {
-            return false;
-        }
-
-        $prefix = sprintf(
-            'private-user-%s-%s',
-            $this->sanitizeChannelSegment($morphType),
-            $this->sanitizeChannelSegment((string) $key),
-        );
-
-        if ($channelName === $prefix) {
-            return true;
-        }
-
-        return str_starts_with($channelName, $prefix.'-device-');
-    }
-
-    private function sanitizeChannelSegment(string $value): string
-    {
-        return preg_replace('/[^a-zA-Z0-9_\-=@,.;]/', '_', $value) ?? '';
     }
 }

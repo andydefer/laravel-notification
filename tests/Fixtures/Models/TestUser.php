@@ -7,13 +7,16 @@ namespace AndyDefer\LaravelNotification\Tests\Fixtures\Models;
 use AndyDefer\DomainStructures\Abstracts\AbstractData;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
+use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
+use AndyDefer\LaravelNotification\Channels\PusherChannel;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
 use AndyDefer\LaravelNotification\Traits\HasFcmDevices;
 use AndyDefer\LaravelNotification\Traits\HasNotifications;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
+use AndyDefer\LaravelNotification\ValueObjects\PusherChannelNameVO;
 use AndyDefer\Nemesis\Contracts\MustNemesis;
 use Illuminate\Database\Eloquent\Model;
 
@@ -80,6 +83,32 @@ final class TestUser extends Model implements MustNemesis, NotifiableInterface
                 )
             );
         }
+
+        // ✅ Firebase — une route par token FCM
+        foreach ($this->fcm_tokens as $token) {
+            $collection->add(
+                new NotificationRouteVO(
+                    channelClass: FirebaseCloudMessagingChannel::class,
+                    destination: $token,
+                    metadata: new StrictDataObject(['type' => 'fcm'])
+                )
+            );
+        }
+
+        // ✅ Pusher — une route vers le canal privé de l'utilisateur
+        $pusherChannel = PusherChannelNameVO::forModel($this)->getValue();
+
+        $collection->add(
+            new NotificationRouteVO(
+                channelClass: PusherChannel::class,
+                destination: $pusherChannel,
+                metadata: new StrictDataObject([
+                    'type' => 'pusher',
+                    'channel' => $pusherChannel,
+                    'event' => 'notification',
+                ])
+            )
+        );
 
         return $collection;
     }
