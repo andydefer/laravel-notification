@@ -9,9 +9,11 @@ use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
 use AndyDefer\LaravelNotification\Configs\NotificationConfig;
 use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
 use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcessorInterface;
+use AndyDefer\LaravelNotification\Contracts\Repositories\FcmDeviceRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Processors\NotificationSenderProcessor;
+use AndyDefer\LaravelNotification\Repositories\FcmDeviceRepository;
 use AndyDefer\LaravelNotification\Repositories\NotificationRepository;
 use AndyDefer\LaravelNotification\Services\NotificationService;
 use AndyDefer\Logger\Contracts\LoggerInterface;
@@ -36,7 +38,7 @@ final class NotificationServiceProvider extends ServiceProvider
             concrete: NotificationConfig::class
         );
 
-        // ✅ Repository
+        // ✅ Repository — Notification
         $this->app->singleton(
             abstract: NotificationRepository::class,
             concrete: function ($app) {
@@ -47,6 +49,19 @@ final class NotificationServiceProvider extends ServiceProvider
         $this->app->bind(
             abstract: NotificationRepositoryInterface::class,
             concrete: NotificationRepository::class
+        );
+
+        // ✅ Repository — FcmDevice
+        $this->app->singleton(
+            abstract: FcmDeviceRepository::class,
+            concrete: function ($app) {
+                return new FcmDeviceRepository;
+            }
+        );
+
+        $this->app->bind(
+            abstract: FcmDeviceRepositoryInterface::class,
+            concrete: FcmDeviceRepository::class
         );
 
         // ✅ Processor
