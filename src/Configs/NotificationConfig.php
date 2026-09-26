@@ -9,6 +9,7 @@ namespace AndyDefer\LaravelNotification\Configs;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
 use AndyDefer\LaravelNotification\Records\DatabaseConfigRecord;
+use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
 use AndyDefer\LaravelNotification\Records\PushConfigRecord;
 use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
@@ -28,6 +29,14 @@ final class NotificationConfig implements NotificationConfigInterface
         'default_from' => null,
         'default_from_name' => null,
         'default_to' => null,
+    ];
+
+    private const DEFAULT_FIREBASE_CONFIG = [
+        'enabled' => false,
+        'credentials_path' => null,
+        'project_id' => null,
+        'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+        'timeout' => 30,
     ];
 
     private const DEFAULT_DATABASE_CONFIG = [
@@ -131,6 +140,24 @@ final class NotificationConfig implements NotificationConfigInterface
         $config = $this->config->get('notification.channels.sms', self::DEFAULT_SMS_CONFIG);
 
         return SmsConfigRecord::from($config);
+    }
+
+    public function getFirebaseConfig(): FirebaseConfigRecord
+    {
+        $config = $this->config->get('notification.channels.firebase', self::DEFAULT_FIREBASE_CONFIG);
+
+        return FirebaseConfigRecord::from([
+            'enabled' => (bool) ($config['enabled'] ?? false),
+            'credentials_path' => $config['credentials_path'] ?? null,
+            'project_id' => $config['project_id'] ?? null,
+            'scope' => (string) ($config['scope'] ?? 'https://www.googleapis.com/auth/firebase.messaging'),
+            'timeout' => (int) ($config['timeout'] ?? 30),
+        ]);
+    }
+
+    public function isFirebaseEnabled(): bool
+    {
+        return $this->getFirebaseConfig()->enabled;
     }
 
     /**

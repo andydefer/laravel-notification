@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Tests\Fixtures\Models;
 
+use AndyDefer\DomainStructures\Abstracts\AbstractData;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
@@ -12,9 +13,10 @@ use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
 use AndyDefer\LaravelNotification\Traits\HasNotifications;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
+use AndyDefer\Nemesis\Contracts\MustNemesis;
 use Illuminate\Database\Eloquent\Model;
 
-final class TestUser extends Model implements NotifiableInterface
+final class TestUser extends Model implements MustNemesis, NotifiableInterface
 {
     use HasNotifications;
 
@@ -23,7 +25,7 @@ final class TestUser extends Model implements NotifiableInterface
     protected $fillable = [
         'name',
         'email',
-        'email_secondary', // ✅ AJOUTÉ
+        'email_secondary',
         'phone',
     ];
 
@@ -31,7 +33,6 @@ final class TestUser extends Model implements NotifiableInterface
     {
         $collection = new NotificationRouteCollection;
 
-        // ✅ Canal de test (toujours actif)
         $collection->add(
             new NotificationRouteVO(
                 channelClass: TestChannel::class,
@@ -50,7 +51,6 @@ final class TestUser extends Model implements NotifiableInterface
             );
         }
 
-        // ✅ Email secondaire
         if ($this->email_secondary) {
             $collection->add(
                 new NotificationRouteVO(
@@ -72,7 +72,7 @@ final class TestUser extends Model implements NotifiableInterface
         if ($this->phone) {
             $collection->add(
                 new NotificationRouteVO(
-                    channelClass: TestChannel::class,  // ✅ Utilise TestChannel au lieu de SmsChannel
+                    channelClass: TestChannel::class,
                     destination: $this->phone,
                     metadata: new StrictDataObject(['type' => 'phone'])
                 )
@@ -82,13 +82,11 @@ final class TestUser extends Model implements NotifiableInterface
         return $collection;
     }
 
-    public function getMorphClass(): string
+    public function nemesisFormat(): AbstractData
     {
-        return TestUser::class;
-    }
-
-    public function getKey(): int
-    {
-        return $this->id;
+        return new class($this->getKey()) extends AbstractData
+        {
+            public function __construct(public readonly int|string|null $id) {}
+        };
     }
 }

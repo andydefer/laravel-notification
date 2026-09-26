@@ -111,6 +111,14 @@ return [
             'webhook_url' => env('SLACK_WEBHOOK_URL'),
         ],
 
+        'firebase' => [
+            'enabled' => env('FIREBASE_NOTIFICATION_ENABLED', false),
+            'credentials_path' => env('FIREBASE_CREDENTIALS_PATH'),
+            'project_id' => env('FIREBASE_PROJECT_ID'),
+            'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+            'timeout' => env('FIREBASE_TIMEOUT', 30),
+        ],
+
         /*
         |--------------------------------------------------------------------------
         | Telegram Channel

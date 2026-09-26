@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Tests;
 
+use AndyDefer\Actions\ActionServiceProvider;
+use AndyDefer\Directive\Helpers\Paths;
 use AndyDefer\LaravelNotification\NotificationServiceProvider;
 use AndyDefer\Logger\LoggerServiceProvider;
+use AndyDefer\Nemesis\NemesisServiceProvider;
 use AndyDefer\Task\TaskServiceProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -102,6 +105,8 @@ abstract class TestCase extends Orchestra
         return [
             TaskServiceProvider::class,
             LoggerServiceProvider::class,
+            ActionServiceProvider::class,
+            NemesisServiceProvider::class,
             NotificationServiceProvider::class,
         ];
     }
@@ -255,9 +260,14 @@ abstract class TestCase extends Orchestra
     {
         $testMigrationsPath = __DIR__.'/Fixtures/migrations';
         $packageMigrationsPath = __DIR__.'/../database/migrations';
+        $nemesisMigrationsPath = Paths::packageRoot().'/../laravel-nemesis/database/migrations';
 
         if (is_dir($packageMigrationsPath)) {
             $this->loadMigrationsFrom($packageMigrationsPath);
+        }
+
+        if (is_dir($nemesisMigrationsPath)) {
+            $this->loadMigrationsFrom($nemesisMigrationsPath);
         }
 
         if (is_dir($testMigrationsPath)) {

@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Contracts\Configs;
 
 use AndyDefer\LaravelNotification\Records\DatabaseConfigRecord;
+use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
 use AndyDefer\LaravelNotification\Records\PushConfigRecord;
 use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
@@ -85,6 +86,20 @@ interface NotificationConfigInterface
      * @return PusherConfigRecord The Pusher configuration
      */
     public function getPusherConfig(): PusherConfigRecord;
+
+    /**
+     * Get the Firebase Cloud Messaging channel configuration.
+     *
+     * @return FirebaseConfigRecord The Firebase configuration
+     */
+    public function getFirebaseConfig(): FirebaseConfigRecord;
+
+    /**
+     * Check if Firebase channel is enabled.
+     *
+     * @return bool True if Firebase is enabled, false otherwise
+     */
+    public function isFirebaseEnabled(): bool;
 
     /**
      * Check if SMS channel is enabled.

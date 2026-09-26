@@ -23,31 +23,35 @@ final class NotificationServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // ✅ Enregistrer la classe concrète en singleton
+        // ✅ Config
         $this->app->singleton(
             abstract: NotificationConfig::class,
             concrete: function ($app) {
-                return new NotificationConfig(
-                    $app['config'],
-                );
+                return new NotificationConfig($app['config']);
             }
         );
 
-        // ✅ Bind l'interface vers la classe concrète
         $this->app->bind(
             abstract: NotificationConfigInterface::class,
             concrete: NotificationConfig::class
         );
 
-        // ✅ Repository - Bind interface to concrete implementation
+        // ✅ Repository
         $this->app->singleton(
+            abstract: NotificationRepository::class,
+            concrete: function ($app) {
+                return new NotificationRepository;
+            }
+        );
+
+        $this->app->bind(
             abstract: NotificationRepositoryInterface::class,
             concrete: NotificationRepository::class
         );
 
-        // ✅ Processor - Bind interface to concrete implementation
+        // ✅ Processor
         $this->app->singleton(
-            abstract: NotificationSenderProcessorInterface::class,
+            abstract: NotificationSenderProcessor::class,
             concrete: function ($app) {
                 return new NotificationSenderProcessor(
                     notificationRepository: $app->make(NotificationRepositoryInterface::class),
@@ -56,9 +60,14 @@ final class NotificationServiceProvider extends ServiceProvider
             }
         );
 
-        // ✅ NotificationService (interface + concrete)
+        $this->app->bind(
+            abstract: NotificationSenderProcessorInterface::class,
+            concrete: NotificationSenderProcessor::class
+        );
+
+        // ✅ Service
         $this->app->singleton(
-            abstract: NotificationServiceInterface::class,
+            abstract: NotificationService::class,
             concrete: function ($app) {
                 return new NotificationService(
                     notificationRepository: $app->make(NotificationRepositoryInterface::class),
@@ -71,22 +80,19 @@ final class NotificationServiceProvider extends ServiceProvider
             }
         );
 
-        // ✅ Alias for concrete service
-        $this->app->alias(
+        $this->app->bind(
             abstract: NotificationServiceInterface::class,
-            alias: NotificationService::class
+            concrete: NotificationService::class
         );
 
-        // ✅ NotifiableBuilder - Register as singleton
+        // ✅ NotifiableBuilder
         $this->app->singleton(
             abstract: NotifiableBuilder::class,
             concrete: function ($app) {
-                return NotifiableBuilder::create(
-                );
+                return NotifiableBuilder::create();
             }
         );
 
-        // ✅ Alias for NotifiableBuilder (convenience)
         $this->app->alias(
             abstract: NotifiableBuilder::class,
             alias: 'notifiable.builder'
@@ -99,6 +105,8 @@ final class NotificationServiceProvider extends ServiceProvider
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }
 
+        $this->loadRoutesFrom(__DIR__.'/../routes/notification.php');
+
         $this->publishes([
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'notification-migrations');
@@ -106,5 +114,9 @@ final class NotificationServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../config/notification.php' => config_path('notification.php'),
         ], 'notification-config');
+
+        $this->publishes([
+            __DIR__.'/../routes/notification.php' => base_path('routes/notification.php'),
+        ], 'notification-routes');
     }
 }

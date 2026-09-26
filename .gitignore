@@ -93,3 +93,4 @@ phpstan.md
 psalm.md
 rector.md
 tests/test_env.php
+firebase-test
