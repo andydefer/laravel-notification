@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\ValueObjects;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractValueObject;
+use AndyDefer\LaravelNotification\Configs\NotificationConfig;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -13,16 +14,21 @@ use Illuminate\Database\Eloquent\Model;
  * Encapsulates the naming rules for private channels and their
  * device sub-channels. Ensures consistency between producers
  * (models declaring routes) and consumers (PusherAuthAction).
+ *
+ * The prefix is resolved internally from the notification config
+ * (`notification.channels.pusher.user_channel_prefix`).
  */
 final class PusherChannelNameVO extends AbstractValueObject
 {
-    private const PREFIX = 'private-user-';
+    private readonly string $prefix;
 
     public function __construct(private readonly string $value)
     {
-        if ($value === '' || ! str_starts_with($value, self::PREFIX)) {
+        $this->prefix = self::resolvePrefix();
+
+        if ($value === '' || ! str_starts_with($value, $this->prefix)) {
             throw new \InvalidArgumentException(
-                sprintf('Pusher channel name must start with "%s".', self::PREFIX),
+                sprintf('Pusher channel name must start with "%s".', $this->prefix),
             );
         }
     }
@@ -44,7 +50,7 @@ final class PusherChannelNameVO extends AbstractValueObject
 
         return new self(sprintf(
             '%s%s-%s',
-            self::PREFIX,
+            self::resolvePrefix(),
             self::sanitize($morphType),
             self::sanitize((string) $key),
         ));
@@ -88,9 +94,21 @@ final class PusherChannelNameVO extends AbstractValueObject
         return $this->value;
     }
 
+    public function getPrefix(): string
+    {
+        return $this->prefix;
+    }
+
     public function __toString(): string
     {
         return $this->value;
+    }
+
+    private static function resolvePrefix(): string
+    {
+        return app(NotificationConfig::class)
+            ->getPusherConfig()
+            ->user_channel_prefix;
     }
 
     private static function sanitize(string $value): string

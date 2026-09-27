@@ -1,7 +1,5 @@
 <?php
 
-// src/Records/PusherConfigRecord.php
-
 declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Records;
@@ -19,5 +17,6 @@ final class PusherConfigRecord extends AbstractRecord
         public readonly bool $use_tls = true,
         public readonly int $timeout = 30,
         public readonly string $default_channel = 'notifications',
+        public readonly string $user_channel_prefix = 'private-user-',
     ) {}
 }

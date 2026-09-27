@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Datas;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractData;
+use AndyDefer\LaravelNotification\Enums\FcmPlatform;
 use AndyDefer\PhpVo\ValueObjects\DateTimeZuluVO;
 
 final class FcmDeviceData extends AbstractData
@@ -13,7 +14,7 @@ final class FcmDeviceData extends AbstractData
         public readonly string $id,
         public readonly string $deviceId,
         public readonly string $token,
-        public readonly ?string $platform,
+        public readonly ?FcmPlatform $platform,
         public readonly ?DateTimeZuluVO $lastSeenAt,
     ) {}
 }

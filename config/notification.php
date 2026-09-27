@@ -53,6 +53,7 @@ return [
             'use_tls' => env('PUSHER_USE_TLS', true),
             'timeout' => env('PUSHER_TIMEOUT', 30),
             'default_channel' => env('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
+            'user_channel_prefix' => env('PUSHER_USER_CHANNEL_PREFIX', 'private-user-'),
         ],
         /*
         |--------------------------------------------------------------------------
