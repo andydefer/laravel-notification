@@ -128,8 +128,6 @@ final class NotificationServiceProvider extends ServiceProvider
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }
 
-        $this->loadRoutesFrom(__DIR__.'/../routes/notification.php');
-
         $this->publishes([
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'notification-migrations');
