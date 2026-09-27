@@ -17,7 +17,7 @@ final class NotificationFilterRecord extends AbstractRecord
         public readonly ?FqcnChannelVO $channel = null,
         public readonly ?string $destination = null,
         public readonly ?string $notifiable_type = null,
-        public readonly ?int $notifiable_id = null,
+        public readonly ?string $notifiable_id = null,
         public readonly ?NotificationStatus $status = null,
         public readonly ?NotificationStatusCollection $statuses = null,
         public readonly ?bool $read = null,

@@ -32,11 +32,22 @@ final class NotificationConfig implements NotificationConfigInterface
     ];
 
     private const DEFAULT_FIREBASE_CONFIG = [
+        // Server-side (admin SDK)
         'enabled' => false,
         'credentials_path' => null,
         'project_id' => null,
         'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
         'timeout' => 30,
+
+        // Client-side (public)
+        'api_key' => null,
+        'auth_domain' => null,
+        'storage_bucket' => null,
+        'messaging_sender_id' => null,
+        'app_id' => null,
+        'measurement_id' => null,
+        'vapid_key' => null,
+        'legacy_key' => null,
     ];
 
     private const DEFAULT_DATABASE_CONFIG = [
@@ -142,16 +153,33 @@ final class NotificationConfig implements NotificationConfigInterface
         return SmsConfigRecord::from($config);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function getFirebaseConfig(): FirebaseConfigRecord
     {
-        $config = $this->config->get('notification.channels.firebase', self::DEFAULT_FIREBASE_CONFIG);
+        $config = $this->config->get(
+            'notification.channels.firebase',
+            self::DEFAULT_FIREBASE_CONFIG,
+        );
 
         return FirebaseConfigRecord::from([
+            // Server-side
             'enabled' => (bool) ($config['enabled'] ?? false),
             'credentials_path' => $config['credentials_path'] ?? null,
             'project_id' => $config['project_id'] ?? null,
             'scope' => (string) ($config['scope'] ?? 'https://www.googleapis.com/auth/firebase.messaging'),
             'timeout' => (int) ($config['timeout'] ?? 30),
+
+            // Client-side
+            'api_key' => $config['api_key'] ?? null,
+            'auth_domain' => $config['auth_domain'] ?? null,
+            'storage_bucket' => $config['storage_bucket'] ?? null,
+            'messaging_sender_id' => $config['messaging_sender_id'] ?? null,
+            'app_id' => $config['app_id'] ?? null,
+            'measurement_id' => $config['measurement_id'] ?? null,
+            'vapid_key' => $config['vapid_key'] ?? null,
+            'legacy_key' => $config['legacy_key'] ?? null,
         ]);
     }
 

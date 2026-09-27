@@ -115,15 +115,15 @@ final class NotificationRepositoryTest extends TestCase
             data: ['user_id' => 1]
         );
 
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $sessionId,
-            channel: $this->mailChannelVO,
-            destination: 'test@example.com',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-        );
+        $record = NotificationRecord::from([
+            'id' => $id,
+            'session_id' => $sessionId,
+            'channel' => $this->mailChannelVO,
+            'destination' => 'test@example.com',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => $this->user->getKey(),
+            'message' => $message,
+        ]);
 
         // Act : Create the notification
         $model = $this->repository->create($record);
@@ -158,16 +158,16 @@ final class NotificationRepositoryTest extends TestCase
             type: 'payment'
         );
 
-        $record = new NotificationRecord(
-            id: $id,
-            session_id: $sessionId,
-            channel: $this->databaseChannelVO,
-            destination: 'database',
-            notifiable_type: $this->user->getMorphClass(),
-            notifiable_id: $this->user->getKey(),
-            message: $message,
-            status: NotificationStatus::SENT,
-        );
+        $record = NotificationRecord::from([
+            'id' => $id,
+            'session_id' => $sessionId,
+            'channel' => $this->databaseChannelVO,
+            'destination' => 'database',
+            'notifiable_type' => $this->user->getMorphClass(),
+            'notifiable_id' => $this->user->getKey(),
+            'message' => $message,
+            'status' => NotificationStatus::SENT,
+        ]);
 
         // Act : Create the notification
         $model = $this->repository->create($record);

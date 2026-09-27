@@ -14,5 +14,15 @@ final class FirebaseConfigRecord extends AbstractRecord
         public readonly ?string $project_id = null,
         public readonly string $scope = 'https://www.googleapis.com/auth/firebase.messaging',
         public readonly int $timeout = 30,
+
+        // Client-side Firebase config (public, exposed to Vite)
+        public readonly ?string $api_key = null,
+        public readonly ?string $auth_domain = null,
+        public readonly ?string $storage_bucket = null,
+        public readonly ?string $messaging_sender_id = null,
+        public readonly ?string $app_id = null,
+        public readonly ?string $measurement_id = null,
+        public readonly ?string $vapid_key = null,
+        public readonly ?string $legacy_key = null,
     ) {}
 }

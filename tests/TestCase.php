@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Tests;
 
 use AndyDefer\Actions\ActionServiceProvider;
+use AndyDefer\Directive\DirectiveServiceProvider;
 use AndyDefer\Directive\Helpers\Paths;
 use AndyDefer\LaravelNotification\NotificationServiceProvider;
 use AndyDefer\Logger\LoggerServiceProvider;
@@ -103,6 +104,7 @@ abstract class TestCase extends Orchestra
     protected function getPackageProviders($app): array
     {
         return [
+            DirectiveServiceProvider::class,
             TaskServiceProvider::class,
             LoggerServiceProvider::class,
             ActionServiceProvider::class,
@@ -165,15 +167,30 @@ abstract class TestCase extends Orchestra
         ]);
 
         $config->set('notification.channels.firebase', [
+            // Server-side (admin SDK)
             'enabled' => filter_var(
                 $this->getEnv('FIREBASE_NOTIFICATION_ENABLED', 'true'),
                 FILTER_VALIDATE_BOOLEAN,
             ),
             'credentials_path' => $this->getEnv('FIREBASE_CREDENTIALS_PATH'),
             'project_id' => $this->getEnv('FIREBASE_PROJECT_ID'),
-            'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+            'scope' => $this->getEnv(
+                'FIREBASE_SCOPE',
+                'https://www.googleapis.com/auth/firebase.messaging',
+            ),
             'timeout' => (int) $this->getEnv('FIREBASE_TIMEOUT', '30'),
+
+            // Client-side (public config)
+            'api_key' => $this->getEnv('FIREBASE_API_KEY'),
+            'auth_domain' => $this->getEnv('FIREBASE_AUTH_DOMAIN'),
+            'storage_bucket' => $this->getEnv('FIREBASE_STORAGE_BUCKET'),
+            'messaging_sender_id' => $this->getEnv('FIREBASE_MESSAGING_SENDER_ID'),
+            'app_id' => $this->getEnv('FIREBASE_APP_ID'),
+            'measurement_id' => $this->getEnv('FIREBASE_MEASUREMENT_ID'),
+            'vapid_key' => $this->getEnv('FIREBASE_VAPID_KEY'),
+            'legacy_key' => $this->getEnv('FIREBASE_KEY'),
         ]);
+
         $config->set('notification.channels.sms', [
             'enabled' => true,
             'driver' => 'twilio',

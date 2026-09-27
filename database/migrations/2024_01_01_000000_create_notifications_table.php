@@ -15,7 +15,7 @@ return new class extends Migration
             $table->string('channel');
             $table->string('destination');
             $table->string('notifiable_type');
-            $table->unsignedBigInteger('notifiable_id');
+            $table->string('notifiable_id');
             $table->json('message');
             $table->json('metadata')->nullable();
             $table->string('status')->default(NotificationStatus::PENDING->value);

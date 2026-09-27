@@ -12,6 +12,7 @@ use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcess
 use AndyDefer\LaravelNotification\Contracts\Repositories\FcmDeviceRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
+use AndyDefer\LaravelNotification\Helpers\FcmPingPong;
 use AndyDefer\LaravelNotification\Processors\NotificationSenderProcessor;
 use AndyDefer\LaravelNotification\Repositories\FcmDeviceRepository;
 use AndyDefer\LaravelNotification\Repositories\NotificationRepository;
@@ -93,6 +94,13 @@ final class NotificationServiceProvider extends ServiceProvider
                     hydration: $app->make(HydrationService::class),
                 );
             }
+        );
+
+        $this->app->singleton(
+            abstract: FcmPingPong::class,
+            concrete: fn ($app) => new FcmPingPong(
+                $app->make(NotificationServiceInterface::class),
+            ),
         );
 
         $this->app->bind(
