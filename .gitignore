@@ -94,3 +94,4 @@ psalm.md
 rector.md
 tests/test_env.php
 firebase-test
+tests/Fixtures/firebase_credentials.jsontests/Fixtures/firebase_credentials.json
