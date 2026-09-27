@@ -24,6 +24,26 @@ final class FcmDeviceRepository extends AbstractRepository implements FcmDeviceR
      */
     public function upsertFor(FcmDeviceRecord $record): FcmDevice
     {
+        // 1. Priorité : une ligne existe déjà avec ce token → on la remplace.
+        $existingByToken = $this->model->newQuery()
+            ->where('token', $record->token)
+            ->first();
+
+        if ($existingByToken !== null) {
+            $existingByToken->fill([
+                'notifiable_type' => $record->notifiable_type,
+                'notifiable_id' => $record->notifiable_id,
+                'device_id' => $record->device_id,
+                'platform' => $record->platform?->value,
+                'user_agent' => $record->user_agent,
+                'last_seen_at' => $record->last_seen_at ?? now(),
+            ]);
+            $existingByToken->save();
+
+            return $existingByToken;
+        }
+
+        // 2. Sinon : recherche par (notifiable_type, notifiable_id, device_id).
         $key = [
             'notifiable_type' => $record->notifiable_type,
             'notifiable_id' => $record->notifiable_id,
@@ -37,21 +57,17 @@ final class FcmDeviceRepository extends AbstractRepository implements FcmDeviceR
             'last_seen_at' => $record->last_seen_at ?? now(),
         ];
 
-        /** @var FcmDevice|null $existing */
         $existing = $this->model->newQuery()->where($key)->first();
 
         if ($existing !== null) {
             $existing->fill($values);
             $existing->save();
 
-            /** @var FcmDevice $existing */
             return $existing;
         }
 
-        /** @var FcmDevice $created */
-        $created = $this->model->newQuery()->create($key + $values);
-
-        return $created;
+        // 3. Aucune ligne trouvée : création.
+        return $this->model->newQuery()->create($key + $values);
     }
 
     protected function applyFilters(Builder $query, AbstractRecord $filters): void
