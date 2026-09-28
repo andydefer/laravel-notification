@@ -9,8 +9,13 @@ use AndyDefer\Directive\Enums\ExitCode;
 use AndyDefer\DomainStructures\Collections\Utility\StringTypedCollection;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Tasks\PruneFailedWebPushNotificationsTask;
+use AndyDefer\Repository\Records\FindByRecord;
+use AndyDefer\Repository\ValueObjects\SortColumns;
+use AndyDefer\Task\Contracts\Repositories\RecurringTaskRepositoryInterface;
 use AndyDefer\Task\Contracts\Services\RecurringTaskServiceInterface;
+use AndyDefer\Task\Enums\RecurringTaskStatus;
 use AndyDefer\Task\Records\RecurringTaskConfigRecord;
+use AndyDefer\Task\Records\RecurringTaskFiltersRecord;
 use AndyDefer\Task\ValueObjects\DescriptionVO;
 use AndyDefer\Task\ValueObjects\DurationVO;
 use AndyDefer\Task\ValueObjects\Iso8601DateTimeVO;
@@ -60,12 +65,20 @@ class RegisterPruneFailedWebPushNotificationsDirective extends AbstractDirective
         $maxAttempts = (int) $this->getArgument('maxAttempts');
         $force = $this->getFlag('force');
 
+        $app = $this->getKernel()->getApplication();
+
         /** @var RecurringTaskServiceInterface $service */
-        $service = app(RecurringTaskServiceInterface::class);
+        $service = $app->make(RecurringTaskServiceInterface::class);
+
+        /** @var RecurringTaskRepositoryInterface $repository */
+        $repository = $app->make(RecurringTaskRepositoryInterface::class);
 
         $fqcn = new RecurringTaskFqcnVO(PruneFailedWebPushNotificationsTask::class);
 
-        if (! $force && $this->recurringTaskExists($service, $fqcn)) {
+        // Toujours dédupliquer avant d'enregistrer.
+        $this->unify($repository, $fqcn);
+
+        if (! $force && $this->recurringTaskExists($repository, $fqcn)) {
             $this->warn(sprintf(
                 'Recurring task %s is already registered. Use --force to override.',
                 PruneFailedWebPushNotificationsTask::class,
@@ -97,19 +110,60 @@ class RegisterPruneFailedWebPushNotificationsDirective extends AbstractDirective
         return ExitCode::SUCCESS;
     }
 
+    /**
+     * Keeps a single task per FQCN and force-deletes every other
+     * duplicate, regardless of state. Ensures the directive is
+     * idempotent across runs.
+     */
+    private function unify(
+        RecurringTaskRepositoryInterface $repository,
+        RecurringTaskFqcnVO $fqcn,
+    ): void {
+        $tasks = $repository->findBy(new FindByRecord(
+            filters: RecurringTaskFiltersRecord::from([
+                'fqcn' => $fqcn,
+                'include_deleted' => true,
+            ]),
+            sortBy: new SortColumns('created_at:asc'),
+        ));
+
+        if ($tasks->count() <= 1) {
+            return;
+        }
+
+        $playing = $tasks->filter(
+            fn ($task) => $task->getStatus() === RecurringTaskStatus::PLAYING,
+        );
+
+        $kept = $playing->first() ?? $tasks->first();
+        $deleted = 0;
+
+        foreach ($tasks as $task) {
+            if ($task->getId()->getValue() === $kept->getId()->getValue()) {
+                continue;
+            }
+
+            $repository->forceDelete($task->getId()->getValue());
+            $deleted++;
+        }
+
+        $this->warn(sprintf(
+            'Deduplicated %d task(s) for %s.',
+            $deleted,
+            PruneFailedWebPushNotificationsTask::class,
+        ));
+    }
+
     private function recurringTaskExists(
-        RecurringTaskServiceInterface $service,
+        RecurringTaskRepositoryInterface $repository,
         RecurringTaskFqcnVO $fqcn,
     ): bool {
-        $existing = collect()
-            ->merge($service->findWaiting())
-            ->merge($service->findPlaying())
-            ->merge($service->findPaused())
-            ->filter(static function ($task) use ($fqcn): bool {
-                return $task->fqcn !== null
-                    && $task->fqcn->getValue() === $fqcn->getValue();
-            });
+        $tasks = $repository->findBy(new FindByRecord(
+            filters: RecurringTaskFiltersRecord::from([
+                'fqcn' => $fqcn,
+            ]),
+        ));
 
-        return $existing->isNotEmpty();
+        return $tasks->isNotEmpty();
     }
 }
