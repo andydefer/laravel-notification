@@ -124,6 +124,59 @@ final class PusherDriverTest extends TestCase
         $this->assertNull($result->error_message);
     }
 
+    public function test_execute_triggers_public_announcements_channel(): void
+    {
+        $route = new NotificationRouteVO(
+            channelClass: PusherChannel::class,
+            destination: 'announcements',
+            metadata: new StrictDataObject([
+                'type' => 'pusher',
+                'channel' => 'announcements',
+                'event' => 'notification',
+            ]),
+        );
+
+        $message = new NotificationMessageVO(
+            body: new MessageBodyVO('Annonce publique'),
+            subject: new MessageSubjectVO('Hello everyone'),
+            type: 'announcement',
+            data: new StrictDataObject([
+                'priority' => 'high',
+            ]),
+        );
+
+        $result = $this->driver->send($message, $route);
+
+        $this->assertTrue($result->success);
+        $this->assertEquals(PusherChannel::class, $result->channel->getValue());
+        $this->assertEquals('announcements', $result->destination);
+        $this->assertNull($result->error_message);
+    }
+
+    public function test_execute_triggers_public_announcements_with_custom_event(): void
+    {
+        $route = new NotificationRouteVO(
+            channelClass: PusherChannel::class,
+            destination: 'announcements',
+            metadata: new StrictDataObject([
+                'channel' => 'announcements',
+                'event' => 'notification.custom',
+            ]),
+        );
+
+        $message = new NotificationMessageVO(
+            body: new MessageBodyVO('Annonce avec event personnalisé'),
+            subject: new MessageSubjectVO('Custom event'),
+            type: 'announcement',
+        );
+
+        $result = $this->driver->send($message, $route);
+
+        $this->assertTrue($result->success);
+        $this->assertEquals('announcements', $result->destination);
+        $this->assertNull($result->error_message);
+    }
+
     public function test_get_channel_returns_pusher(): void
     {
         $this->assertEquals('pusher', $this->driver->getChannel());

@@ -28,10 +28,6 @@ final class WebPushDriver extends AbstractDriver
 
     private const AUTH_KEY = 'auth';
 
-    private const TITLE_KEY = 'title';
-
-    private const DATA_KEY = 'data';
-
     public function __construct(
         private readonly WebPushConfigRecord $config,
     ) {}
@@ -64,11 +60,9 @@ final class WebPushDriver extends AbstractDriver
 
         $webPush = $this->createClient();
 
-        $payload = $this->buildPayload($message, $metadata);
-
         $report = $webPush->sendOneNotification(
             $subscription,
-            json_encode($payload, JSON_THROW_ON_ERROR),
+            json_encode($message->toArray(), JSON_THROW_ON_ERROR),
         );
 
         if ($report->isSuccess()) {
@@ -130,30 +124,5 @@ final class WebPushDriver extends AbstractDriver
                 $exception,
             );
         }
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function buildPayload(NotificationMessageVO $message, mixed $metadata): array
-    {
-        $payload = [
-            'title' => $metadata?->get(self::TITLE_KEY) ?? (string) $message->getSubjectValue(),
-            'subject' => (string) $message->getSubjectValue(),
-            'body' => (string) $message->getBodyValue(),
-            'type' => $message->getType(),
-        ];
-
-        $routeData = $metadata?->get(self::DATA_KEY);
-        if (is_array($routeData) && $routeData !== []) {
-            $payload['data'] = $routeData;
-        }
-
-        $messageData = $message->getData()?->toArray() ?? [];
-        if ($messageData !== []) {
-            $payload['data'] = array_merge($payload['data'] ?? [], $messageData);
-        }
-
-        return $payload;
     }
 }

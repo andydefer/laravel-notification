@@ -50,13 +50,7 @@ final class PusherDriver extends AbstractDriver
         $event = $this->resolveEventName($route);
 
         try {
-            $this->client()->trigger($channel, $event, [
-                'body' => $message->getBodyValue(),
-                'subject' => $message->getSubjectValue(),
-                'type' => $message->getType(),
-                'data' => $message->getData()?->toArray() ?? [],
-                'sent_at' => now()->toIso8601String(),
-            ]);
+            $this->client()->trigger($channel, $event, $message->toArray());
         } catch (PusherException $exception) {
             throw new RuntimeException(
                 sprintf('Pusher trigger failed: %s', $exception->getMessage()),
