@@ -83,6 +83,14 @@ abstract class TestCase extends Orchestra
             'PUSHER_TIMEOUT' => '30',
             'PUSHER_NOTIFICATION_CHANNEL' => 'notifications',
 
+            'WEBPUSH_NOTIFICATION_ENABLED' => 'true',
+            'WEBPUSH_SUBJECT' => 'mailto:contact@afya-medical.com',
+            'WEBPUSH_PUBLIC_KEY' => 'BDw92Y6vnPXYNN90QwiqmLAnnEX9GJZo27by3Bpo2nATkEAivqJIf436LV_Vc8Hg7S2fkzJp3Ow_5p0CVCVTX5g',
+            'WEBPUSH_PRIVATE_KEY' => 'm7lTHzndL5P7QL0be8a0l1whYsy8pFhKJD6dYtRvUpA',
+            'WEBPUSH_TTL' => '3600',
+            'WEBPUSH_URGENCY' => 'normal',
+            'WEBPUSH_TOPIC' => 'notification',
+
             'NOTIFICATION_LOG_CHANNEL' => 'daily',
             'NOTIFICATION_LOG_LEVEL' => 'debug',
         ];
@@ -239,6 +247,19 @@ abstract class TestCase extends Orchestra
             'use_tls' => filter_var($this->getEnv('PUSHER_USE_TLS', 'true'), FILTER_VALIDATE_BOOLEAN),
             'timeout' => (int) $this->getEnv('PUSHER_TIMEOUT', '30'),
             'default_channel' => $this->getEnv('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
+        ]);
+
+        $config->set('notification.channels.webpush', [
+            'enabled' => filter_var(
+                $this->getEnv('WEBPUSH_NOTIFICATION_ENABLED', 'true'),
+                FILTER_VALIDATE_BOOLEAN,
+            ),
+            'subject' => $this->getEnv('WEBPUSH_SUBJECT', 'mailto:contact@afya-medical.com'),
+            'public_key' => $this->getEnv('WEBPUSH_PUBLIC_KEY'),
+            'private_key' => $this->getEnv('WEBPUSH_PRIVATE_KEY'),
+            'ttl' => (int) $this->getEnv('WEBPUSH_TTL', '3600'),
+            'urgency' => $this->getEnv('WEBPUSH_URGENCY', 'normal'),
+            'topic' => $this->getEnv('WEBPUSH_TOPIC', 'notification'),
         ]);
 
         $config->set('notification.channels.database', [

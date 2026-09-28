@@ -1,7 +1,5 @@
 <?php
 
-// src/Contracts/Configs/NotificationConfigInterface.php
-
 declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Contracts\Configs;
@@ -14,6 +12,7 @@ use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
 use AndyDefer\LaravelNotification\Records\SlackConfigRecord;
 use AndyDefer\LaravelNotification\Records\SmsConfigRecord;
 use AndyDefer\LaravelNotification\Records\TelegramConfigRecord;
+use AndyDefer\LaravelNotification\Records\WebPushConfigRecord;
 use AndyDefer\LaravelNotification\Records\WhatsAppConfigRecord;
 
 /**
@@ -95,11 +94,25 @@ interface NotificationConfigInterface
     public function getFirebaseConfig(): FirebaseConfigRecord;
 
     /**
+     * Get the Web Push channel configuration.
+     *
+     * @return WebPushConfigRecord The Web Push configuration
+     */
+    public function getWebPushConfig(): WebPushConfigRecord;
+
+    /**
      * Check if Firebase channel is enabled.
      *
      * @return bool True if Firebase is enabled, false otherwise
      */
     public function isFirebaseEnabled(): bool;
+
+    /**
+     * Check if Web Push channel is enabled.
+     *
+     * @return bool True if Web Push is enabled, false otherwise
+     */
+    public function isWebPushEnabled(): bool;
 
     /**
      * Check if SMS channel is enabled.

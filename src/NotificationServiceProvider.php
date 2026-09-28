@@ -11,11 +11,13 @@ use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
 use AndyDefer\LaravelNotification\Contracts\Processors\NotificationSenderProcessorInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\FcmDeviceRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
+use AndyDefer\LaravelNotification\Contracts\Repositories\WebPushSubscriptionRepositoryInterface;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
 use AndyDefer\LaravelNotification\Helpers\FcmPingPong;
 use AndyDefer\LaravelNotification\Processors\NotificationSenderProcessor;
 use AndyDefer\LaravelNotification\Repositories\FcmDeviceRepository;
 use AndyDefer\LaravelNotification\Repositories\NotificationRepository;
+use AndyDefer\LaravelNotification\Repositories\WebPushSubscriptionRepository;
 use AndyDefer\LaravelNotification\Services\NotificationService;
 use AndyDefer\Logger\Contracts\LoggerInterface;
 use AndyDefer\Task\Contracts\Services\RecurringTaskServiceInterface;
@@ -63,6 +65,11 @@ final class NotificationServiceProvider extends ServiceProvider
         $this->app->bind(
             abstract: FcmDeviceRepositoryInterface::class,
             concrete: FcmDeviceRepository::class
+        );
+
+        $this->app->bind(
+            WebPushSubscriptionRepositoryInterface::class,
+            WebPushSubscriptionRepository::class,
         );
 
         // ✅ Processor

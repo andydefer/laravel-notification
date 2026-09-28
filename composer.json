@@ -21,10 +21,11 @@
     ],
     "require": {
         "php": "^8.2",
-        "andydefer/laravel-task": "^4.13.98",
+        "andydefer/laravel-task": "^4.15.0",
         "pusher/pusher-php-server": "^7.3",
         "google/apiclient": "^2.20",
-        "andydefer/laravel-nemesis": "^1.20.14"
+        "andydefer/laravel-nemesis": "^1.20.14",
+        "minishlink/web-push": "^11.0"
     },
     "require-dev": {
         "barryvdh/laravel-ide-helper": "^3.6",
@@ -48,5 +49,10 @@
         "test-integration": "phpunit --testsuite=integration"
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
+    }
 }

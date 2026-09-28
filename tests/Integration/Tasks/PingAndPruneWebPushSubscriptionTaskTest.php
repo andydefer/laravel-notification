@@ -8,9 +8,9 @@ use AndyDefer\Directive\Services\DirectiveTestingService;
 use AndyDefer\DomainStructures\Services\HydrationService;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Contracts\Services\NotificationServiceInterface;
-use AndyDefer\LaravelNotification\Helpers\FcmPingPong;
-use AndyDefer\LaravelNotification\Models\FcmDevice;
-use AndyDefer\LaravelNotification\Tasks\PingAndPruneFcmDeviceTask;
+use AndyDefer\LaravelNotification\Helpers\WebPushPingPong;
+use AndyDefer\LaravelNotification\Models\WebPushSubscription;
+use AndyDefer\LaravelNotification\Tasks\PingAndPruneWebPushSubscriptionTask;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Models\TestUser;
 use AndyDefer\LaravelNotification\Tests\TestCase;
 use AndyDefer\Logger\Contracts\LoggerInterface;
@@ -29,7 +29,7 @@ use AndyDefer\Task\ValueObjects\UniqueTaskFqcnVO;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-final class PingAndPruneFcmDeviceTaskTest extends TestCase
+final class PingAndPruneWebPushSubscriptionTaskTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -41,9 +41,19 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
 
     private DirectiveTestingService $directiveService;
 
+    private string $endpoint;
+
+    private string $p256dh;
+
+    private string $auth;
+
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->endpoint = (string) $this->getEnv('WEBPUSH_ENDPOINT');
+        $this->p256dh = (string) $this->getEnv('WEBPUSH_P256DH');
+        $this->auth = (string) $this->getEnv('WEBPUSH_AUTH');
 
         $this->user = TestUser::create([
             'name' => 'John Doe',
@@ -65,8 +75,8 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
         );
 
         $this->app->singleton(
-            FcmPingPong::class,
-            fn ($app) => new FcmPingPong(
+            WebPushPingPong::class,
+            fn ($app) => new WebPushPingPong(
                 $app->make(NotificationServiceInterface::class),
             ),
         );
@@ -95,12 +105,13 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
         $this->directiveService->run('tasks:process');
     }
 
-    private function createDevice(string $token, string $deviceId = '550e8400-e29b-41d4-a716-446655440000'): FcmDevice
+    private function createSubscription(string $endpoint): WebPushSubscription
     {
-        return FcmDevice::create([
-            'device_id' => $deviceId,
-            'token' => $token,
-            'platform' => 'web',
+        return WebPushSubscription::create([
+            'endpoint' => $endpoint,
+            'p256dh' => $this->p256dh,
+            'auth' => $this->auth,
+            'browser' => 'chrome',
             'notifiable_type' => $this->user->getMorphClass(),
             'notifiable_id' => (string) $this->user->getKey(),
             'last_seen_at' => now()->subDay(),
@@ -110,7 +121,7 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
     private function createConfig(): UniqueTaskConfigRecord
     {
         return new UniqueTaskConfigRecord(
-            description: new DescriptionVO('Test ping and prune'),
+            description: new DescriptionVO('Test ping and prune webpush'),
             scheduled_at: new Iso8601DateTimeVO(now()->subHours(2)->toIso8601String()),
             max_attempts: new MaxFailedAttemptsVO(3),
             grace_period: new DurationVO(3600),
@@ -122,12 +133,11 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
-        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
-        $device = $this->createDevice($token);
+        $subscription = $this->createSubscription($this->endpoint);
 
         $alias = $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(PingAndPruneFcmDeviceTask::class),
-            StrictDataObject::from(['device_id' => (string) $device->id]),
+            new UniqueTaskFqcnVO(PingAndPruneWebPushSubscriptionTask::class),
+            StrictDataObject::from(['subscription_id' => (string) $subscription->id]),
             $this->createConfig(),
         );
 
@@ -137,58 +147,59 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
         $this->assertNotNull($taskModel);
         $this->assertEquals(UniqueTaskStatus::COMPLETED, $taskModel->getStatus());
 
-        $this->assertDatabaseHas('fcm_devices', ['id' => $device->id]);
+        $this->assertDatabaseHas('web_push_subscriptions', ['id' => $subscription->id]);
     }
 
-    public function test_task_deletes_device_when_invalid(): void
+    public function test_task_deletes_subscription_when_invalid(): void
     {
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
-        $device = $this->createDevice(str_repeat('a', 200));
-        $deviceId = $device->id;
+        $subscription = $this->createSubscription(
+            'https://jmt17.google.com/fcm/send/'.str_repeat('a', 200),
+        );
+        $subscriptionId = $subscription->id;
 
         $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(PingAndPruneFcmDeviceTask::class),
-            StrictDataObject::from(['device_id' => (string) $device->id]),
+            new UniqueTaskFqcnVO(PingAndPruneWebPushSubscriptionTask::class),
+            StrictDataObject::from(['subscription_id' => (string) $subscription->id]),
             $this->createConfig(),
         );
 
         $this->processTasks();
 
-        $this->assertDatabaseMissing('fcm_devices', ['id' => $deviceId]);
+        $this->assertDatabaseMissing('web_push_subscriptions', ['id' => $subscriptionId]);
     }
 
-    public function test_task_deletes_device_when_driver_config_is_missing(): void
+    public function test_task_deletes_subscription_when_config_is_missing(): void
     {
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
-        // Firebase désactivé : l'envoi échoue → PingStatus::INVALID → device supprimé.
-        $this->app['config']->set('notification.channels.firebase.enabled', false);
+        $this->app['config']->set('notification.channels.webpush.enabled', false);
 
-        $device = $this->createDevice(str_repeat('a', 200));
-        $deviceId = $device->id;
+        $subscription = $this->createSubscription($this->endpoint);
+        $subscriptionId = $subscription->id;
 
         $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(PingAndPruneFcmDeviceTask::class),
-            StrictDataObject::from(['device_id' => (string) $device->id]),
+            new UniqueTaskFqcnVO(PingAndPruneWebPushSubscriptionTask::class),
+            StrictDataObject::from(['subscription_id' => (string) $subscription->id]),
             $this->createConfig(),
         );
 
         $this->processTasks();
 
-        $this->assertDatabaseMissing('fcm_devices', ['id' => $deviceId]);
+        $this->assertDatabaseMissing('web_push_subscriptions', ['id' => $subscriptionId]);
     }
 
-    public function test_task_fails_when_device_not_found(): void
+    public function test_task_fails_when_subscription_not_found(): void
     {
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
         $alias = $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(PingAndPruneFcmDeviceTask::class),
-            StrictDataObject::from(['device_id' => '01a0de28-605a-7208-8b40-11d0888080f6']),
+            new UniqueTaskFqcnVO(PingAndPruneWebPushSubscriptionTask::class),
+            StrictDataObject::from(['subscription_id' => '01a0de28-605a-7208-8b40-11d0888080f6']),
             $this->createConfig(),
         );
 
@@ -199,13 +210,13 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
         $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
     }
 
-    public function test_task_fails_when_device_id_missing(): void
+    public function test_task_fails_when_subscription_id_missing(): void
     {
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
         $alias = $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(PingAndPruneFcmDeviceTask::class),
+            new UniqueTaskFqcnVO(PingAndPruneWebPushSubscriptionTask::class),
             StrictDataObject::from([]),
             $this->createConfig(),
         );
@@ -217,25 +228,25 @@ final class PingAndPruneFcmDeviceTaskTest extends TestCase
         $this->assertEquals(UniqueTaskStatus::FAILED, $taskModel->getStatus());
     }
 
-    public function test_task_persists_last_seen_at_on_pong(): void
+    public function test_task_deletes_subscription_when_ping_returns_invalid(): void
     {
         $frozenNow = Carbon::create(2026, 6, 23, 12, 0, 0);
         Carbon::setTestNow($frozenNow);
 
-        $token = (string) $this->getEnv('FIREBASE_DEVICE_TOKEN');
-        $device = $this->createDevice($token);
-
-        $before = $device->last_seen_at;
+        // Endpoint invalide : le ping échoue, la souscription est supprimée.
+        $subscription = $this->createSubscription(
+            'https://jmt17.google.com/fcm/send/invalid-endpoint',
+        );
+        $subscriptionId = $subscription->id;
 
         $this->uniqueTaskService->register(
-            new UniqueTaskFqcnVO(PingAndPruneFcmDeviceTask::class),
-            StrictDataObject::from(['device_id' => (string) $device->id]),
+            new UniqueTaskFqcnVO(PingAndPruneWebPushSubscriptionTask::class),
+            StrictDataObject::from(['subscription_id' => (string) $subscription->id]),
             $this->createConfig(),
         );
 
         $this->processTasks();
 
-        $device->refresh();
-        $this->assertTrue($device->last_seen_at->greaterThan($before));
+        $this->assertDatabaseMissing('web_push_subscriptions', ['id' => $subscriptionId]);
     }
 }

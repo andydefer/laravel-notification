@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Helpers;
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
-use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
+use AndyDefer\LaravelNotification\Channels\WebPushChannel;
 use AndyDefer\LaravelNotification\Collections\FqcnChannelCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Contracts\PingPongInterface;
@@ -20,13 +20,13 @@ use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
 /**
- * Ping/pong helper for FCM devices.
+ * Ping/pong helper for Web Push subscriptions.
  *
- * Sends a lightweight notification to a device's FCM token to verify
- * that the token is still registered and reachable. Any failure is
- * treated as invalid: the device is pruned.
+ * Sends a lightweight notification to a subscription's endpoint to
+ * verify it is still active. Any failure is treated as invalid: the
+ * subscription is pruned.
  */
-final class FcmPingPong implements PingPongInterface
+final class WebPushPingPong implements PingPongInterface
 {
     public const PING_TYPE = 'ping';
 
@@ -44,7 +44,7 @@ final class FcmPingPong implements PingPongInterface
     public function ping(Model $notifiable): PingStatus
     {
         if (! $notifiable instanceof NotifiableInterface) {
-            throw new RuntimeException('Device must implement NotifiableInterface.');
+            throw new RuntimeException('Subscription must implement NotifiableInterface.');
         }
 
         $message = new NotificationMessageVO(
@@ -52,13 +52,12 @@ final class FcmPingPong implements PingPongInterface
             subject: new MessageSubjectVO(self::PING_SUBJECT),
             type: self::PING_TYPE,
             data: new StrictDataObject([
-                'device_id' => (string) ($notifiable->getAttribute('device_id') ?? ''),
-                'token_id' => (string) $notifiable->getKey(),
+                'subscription_id' => (string) $notifiable->getKey(),
             ]),
         );
 
         $channels = new FqcnChannelCollection;
-        $channels->add(new FqcnChannelVO(FirebaseCloudMessagingChannel::class));
+        $channels->add(new FqcnChannelVO(WebPushChannel::class));
 
         $record = SendNowRecord::from([
             'channels' => $channels,

@@ -131,6 +131,15 @@ return [
             'legacy_key' => env('FIREBASE_KEY'),
         ],
 
+        'webpush' => [
+            'enabled' => env('WEBPUSH_NOTIFICATION_ENABLED', false),
+            'subject' => env('WEBPUSH_SUBJECT', env('APP_URL')),
+            'public_key' => env('WEBPUSH_PUBLIC_KEY'),
+            'private_key' => env('WEBPUSH_PRIVATE_KEY'),
+            'ttl' => env('WEBPUSH_TTL', 3600),
+            'urgency' => env('WEBPUSH_URGENCY', 'normal'),
+            'topic' => env('WEBPUSH_TOPIC', 'notification'),
+        ],
         /*
         |--------------------------------------------------------------------------
         | Telegram Channel

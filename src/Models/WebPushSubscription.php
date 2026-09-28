@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Models;
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
-use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
+use AndyDefer\LaravelNotification\Channels\WebPushChannel;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Contracts\PingableInterface;
@@ -15,12 +15,12 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
-final class FcmDevice extends Model implements NotifiableInterface, PingableInterface
+final class WebPushSubscription extends Model implements NotifiableInterface, PingableInterface
 {
     use HasPingPong;
     use HasUuids;
 
-    protected $table = 'fcm_devices';
+    protected $table = 'web_push_subscriptions';
 
     protected $keyType = 'string';
 
@@ -28,9 +28,10 @@ final class FcmDevice extends Model implements NotifiableInterface, PingableInte
 
     protected $fillable = [
         'id',
-        'device_id',
-        'token',
-        'platform',
+        'endpoint',
+        'p256dh',
+        'auth',
+        'browser',
         'user_agent',
         'last_seen_at',
         'notifiable_type',
@@ -51,11 +52,13 @@ final class FcmDevice extends Model implements NotifiableInterface, PingableInte
         $collection = new NotificationRouteCollection;
 
         $collection->add(new NotificationRouteVO(
-            channelClass: FirebaseCloudMessagingChannel::class,
-            destination: (string) $this->token,
+            channelClass: WebPushChannel::class,
+            destination: (string) $this->endpoint,
             metadata: new StrictDataObject([
-                'type' => 'fcm',
-                'device_id' => (string) $this->device_id,
+                'type' => 'webpush',
+                'endpoint' => (string) $this->endpoint,
+                'p256dh' => (string) $this->p256dh,
+                'auth' => (string) $this->auth,
             ]),
         ));
 

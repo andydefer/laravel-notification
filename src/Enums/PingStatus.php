@@ -11,7 +11,6 @@ enum PingStatus: string
 {
     case PONG = 'pong';
     case INVALID = 'invalid';
-    case UNREACHABLE = 'unreachable';
 
     public function isPong(): bool
     {
@@ -21,10 +20,5 @@ enum PingStatus: string
     public function isInvalid(): bool
     {
         return $this === self::INVALID;
-    }
-
-    public function isUnreachable(): bool
-    {
-        return $this === self::UNREACHABLE;
     }
 }

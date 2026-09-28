@@ -26,11 +26,14 @@
 10. [Statistiques et rapports](#statistiques-et-rapports)
 11. [Canaux fonctionnels](#canaux-fonctionnels)
 12. [Drivers fonctionnels](#drivers-fonctionnels)
-13. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
-14. [Cas d'usage concrets](#cas-dusage-concrets)
-15. [Bonnes pratiques](#bonnes-pratiques)
-16. [Trait HasNotifications](#trait-hasnotifications)
-17. [Référence de l'API](#référence-de-lapi)
+13. [Ping/Pong — Vérification et nettoyage des cibles](#pingpong--vérification-et-nettoyage-des-cibles)
+14. [Directives CLI](#directives-cli)
+15. [Tâches internes](#tâches-internes)
+16. [Créer un canal personnalisé](#créer-un-canal-personnalisé)
+17. [Cas d'usage concrets](#cas-dusage-concrets)
+18. [Bonnes pratiques](#bonnes-pratiques)
+19. [Trait HasNotifications](#trait-hasnotifications)
+20. [Référence de l'API](#référence-de-lapi)
 
 ---
 
@@ -48,7 +51,7 @@ php artisan vendor:publish --tag=notification-config
 
 ## Pourquoi Laravel Notification ?
 
-**Le problème :** Votre application doit notifier les utilisateurs par email, temps réel (Pusher) et dans la base de données. Chaque médecin a une adresse email professionnelle et une personnelle. Vous devez tracer **toutes** les notifications pour l'audit, savoir lesquelles ont échoué, et pouvoir consulter l'historique complet.
+**Le problème :** Votre application doit notifier les utilisateurs par email, temps réel (Pusher), Web Push (navigateur), FCM (mobile) et dans la base de données. Chaque médecin a une adresse email professionnelle et une personnelle. Vous devez tracer **toutes** les notifications pour l'audit, savoir lesquelles ont échoué, et pouvoir consulter l'historique complet.
 
 **La solution :** Laravel Notification. Un système complet qui orchestre l'envoi sur tous les canaux d'une entité, trace chaque tentative, et permet la planification avancée.
 
@@ -70,6 +73,10 @@ php artisan vendor:publish --tag=notification-config
 | Corps de message basé vue Laravel | ❌ | ✅ (MessageViewBodyVO) |
 | Trait utilitaire pour les modèles | ❌ | ✅ (HasNotifications) |
 | Temps réel (Pusher) | ❌ | ✅ |
+| Web Push (VAPID) | ❌ | ✅ |
+| Firebase Cloud Messaging | ❌ | ✅ |
+| Ping/Pong (vérification de validité) | ❌ | ✅ |
+| Pruning automatique des cibles invalides | ❌ | ✅ |
 
 ### En une phrase
 
@@ -98,7 +105,8 @@ php artisan vendor:publish --tag=notification-config
                                     ┌─────────────────────────┐
                                     │  Channels (résolution)  │
                                     │  Mail / Database /      │
-                                    │  Pusher                 │
+                                    │  Pusher / WebPush /     │
+                                    │  FirebaseCloudMessaging │
                                     └────────────┬────────────┘
                                                  │
                                                  ▼
@@ -106,7 +114,9 @@ php artisan vendor:publish --tag=notification-config
                                     │  Drivers (exécution)    │
                                     │  MailDriver /           │
                                     │  DatabaseDriver /       │
-                                    │  PusherDriver           │
+                                    │  PusherDriver /         │
+                                    │  WebPushDriver /        │
+                                    │  FcmDriver              │
                                     └─────────────────────────┘
 ```
 
@@ -119,12 +129,17 @@ php artisan vendor:publish --tag=notification-config
 | `NotificationSenderProcessor` | Orchestre l'envoi : résolution des routes, filtres, limites |
 | `SendOptions` | Configuration fluide des options d'envoi (canaux, limites, filtres) |
 | `NotificationRouteVO` | Value Object définissant un canal + destination + métadonnées |
-| `AbstractChannel` | Classe de base pour les canaux (`MailChannel`, `DatabaseChannel`, `PusherChannel`) |
-| `AbstractDriver` | Classe de base pour les drivers (`MailDriver`, `DatabaseDriver`, `PusherDriver`) |
+| `AbstractChannel` | Classe de base pour les canaux |
+| `AbstractDriver` | Classe de base pour les drivers |
 | `SendDelayedNotificationTask` | Tâche unique pour les envois différés/planifiés |
 | `SendRecurringNotificationTask` | Tâche récurrente pour les envois périodiques |
 | `MessageViewBodyVO` | Value Object pour corps de message basé sur vue Laravel |
 | `HasNotifications` | Trait utilitaire pour les modèles Eloquent recevant des notifications |
+| `HasPingPong` | Trait utilitaire implémentant `PingableInterface` |
+| `PingPongAdapter` | Résout le helper ping/pong par modèle |
+| `FcmPingPong` | Helper de vérification pour les appareils FCM |
+| `WebPushPingPong` | Helper de vérification pour les souscriptions Web Push |
+| `PingStatus` | Enum du résultat d'un ping (`PONG`, `INVALID`) |
 
 ---
 
@@ -143,6 +158,8 @@ use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\PusherChannel;
+use AndyDefer\LaravelNotification\Channels\WebPushChannel;
+use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use Illuminate\Database\Eloquent\Model;
 
@@ -170,14 +187,39 @@ class User extends Model implements NotifiableInterface
             ));
         }
 
-        // ✅ Pusher (temps réel vers l'app mobile / web)
+        // ✅ Pusher (temps réel)
         $collection->add(new NotificationRouteVO(
             channelClass: PusherChannel::class,
             destination: "private-user.{$this->id}",
             metadata: new StrictDataObject(['event' => 'notification.received'])
         ));
 
-        // ✅ Base de données (toujours disponible pour la traçabilité)
+        // ✅ Web Push (navigateur)
+        foreach ($this->webPushSubscriptions as $subscription) {
+            $collection->add(new NotificationRouteVO(
+                channelClass: WebPushChannel::class,
+                destination: $subscription->endpoint,
+                metadata: new StrictDataObject([
+                    'endpoint' => $subscription->endpoint,
+                    'p256dh' => $subscription->p256dh,
+                    'auth' => $subscription->auth,
+                ])
+            ));
+        }
+
+        // ✅ FCM (mobile)
+        foreach ($this->fcmDevices as $device) {
+            $collection->add(new NotificationRouteVO(
+                channelClass: FirebaseCloudMessagingChannel::class,
+                destination: $device->token,
+                metadata: new StrictDataObject([
+                    'type' => 'fcm',
+                    'device_id' => $device->device_id,
+                ])
+            ));
+        }
+
+        // ✅ Base de données (traçabilité)
         $collection->add(new NotificationRouteVO(
             channelClass: DatabaseChannel::class,
             destination: 'database'
@@ -204,12 +246,9 @@ Le `NotificationRouteVO` définit une route de notification :
 
 ```php
 new NotificationRouteVO(
-    channelClass: MailChannel::class,      // Canal
-    destination: 'user@example.com',       // Destination
-    metadata: new StrictDataObject([       // Métadonnées optionnelles
-        'type' => 'primary',
-        'name' => 'John Doe',
-    ])
+    channelClass: MailChannel::class,
+    destination: 'user@example.com',
+    metadata: new StrictDataObject(['type' => 'primary'])
 );
 ```
 
@@ -257,64 +296,25 @@ class UserController extends Controller
             'success' => $results->allSuccess(),
             'sent' => $results->getSuccessCount(),
             'failed' => $results->getFailureCount(),
-            'details' => $results->map(fn($r) => [
-                'channel' => $r->channel->getValue(),
-                'destination' => $r->destination,
-                'success' => $r->success,
-            ])->toArray(),
         ]);
     }
 }
 ```
-
-**Résultat :**
-- L'email est envoyé à l'adresse primaire (`limit_per_channel = 1`).
-- L'événement Pusher est diffusé sur `private-user.{id}`.
-- Les notifications sont persistées en base.
-- Le statut de chaque envoi est enregistré (`SENT` ou `FAILED`).
 
 ---
 
 ### Envoi différé
 
 ```php
-<?php
-
 use AndyDefer\LaravelNotification\Records\SendLaterRecord;
 
-class CartController extends Controller
-{
-    public function abandonCart(Cart $cart)
-    {
-        $user = $cart->user;
+$record = SendLaterRecord::from([
+    'delay_seconds' => 1800,
+    'channels' => [MailChannel::class, PusherChannel::class],
+    'limit_per_channel' => 1,
+]);
 
-        $message = new NotificationMessageVO(
-            body: new MessageBodyVO('Vous avez des articles dans votre panier...'),
-            subject: new MessageSubjectVO('Votre panier vous attend !'),
-            type: 'abandoned_cart',
-            data: new StrictDataObject([
-                'cart_id' => $cart->id,
-                'items_count' => $cart->items->count(),
-            ])
-        );
-
-        $record = SendLaterRecord::from([
-            'delay_seconds' => 1800,
-            'channels' => [MailChannel::class, PusherChannel::class],
-            'limit_per_channel' => 1,
-        ]);
-
-        $alias = $this->service->sendLater($user, $message, $record);
-
-        $cart->notification_task = $alias->getValue();
-        $cart->save();
-
-        return response()->json([
-            'message' => 'Rappel planifié dans 30 minutes',
-            'task_alias' => $alias->getValue(),
-        ]);
-    }
-}
+$alias = $this->service->sendLater($user, $message, $record);
 ```
 
 ---
@@ -322,45 +322,16 @@ class CartController extends Controller
 ### Envoi planifié
 
 ```php
-<?php
-
 use AndyDefer\LaravelNotification\Records\SendAtRecord;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 
-class AppointmentController extends Controller
-{
-    public function scheduleReminder(Appointment $appointment)
-    {
-        $user = $appointment->user;
+$record = SendAtRecord::from([
+    'scheduled_at' => new NotificationDateTimeVO($scheduledAt->toIso8601String()),
+    'channels' => [MailChannel::class],
+    'limit_per_channel' => 1,
+]);
 
-        $message = new NotificationMessageVO(
-            body: new MessageBodyVO('Votre rendez-vous est dans 24h.'),
-            subject: new MessageSubjectVO('Rappel de rendez-vous'),
-            type: 'appointment_reminder',
-            data: new StrictDataObject([
-                'appointment_id' => $appointment->id,
-                'start_at' => $appointment->start_at->toIso8601String(),
-            ])
-        );
-
-        $scheduledAt = $appointment->start_at->subDay();
-
-        $record = SendAtRecord::from([
-            'scheduled_at' => new NotificationDateTimeVO(
-                $scheduledAt->toIso8601String()
-            ),
-            'channels' => [MailChannel::class, PusherChannel::class],
-            'limit_per_channel' => 1,
-        ]);
-
-        $alias = $this->service->sendAt($user, $message, $record);
-
-        return response()->json([
-            'message' => 'Rappel planifié pour le ' . $scheduledAt->format('d/m/Y H:i'),
-            'task_alias' => $alias->getValue(),
-        ]);
-    }
-}
+$alias = $this->service->sendAt($user, $message, $record);
 ```
 
 ---
@@ -368,54 +339,27 @@ class AppointmentController extends Controller
 ### Envoi récurrent
 
 ```php
-<?php
-
 use AndyDefer\LaravelNotification\Records\SendRecurringRecord;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationDateTimeVO;
 use AndyDefer\Task\ValueObjects\MaxFailedAttemptsVO;
 
-class NewsletterController extends Controller
-{
-    public function scheduleNewsletter(User $user)
-    {
-        $message = new NotificationMessageVO(
-            body: new MessageBodyVO('Voici les dernières actualités...'),
-            subject: new MessageSubjectVO('Votre newsletter hebdomadaire'),
-            type: 'newsletter',
-            data: new StrictDataObject(['user_id' => $user->id])
-        );
+$record = SendRecurringRecord::from([
+    'interval_seconds' => 604800,
+    'start_at' => new NotificationDateTimeVO('2026-07-08 09:00:00'),
+    'end_at' => new NotificationDateTimeVO('2026-12-31 09:00:00'),
+    'channels' => [MailChannel::class],
+    'limit_per_channel' => 1,
+    'max_attempts' => new MaxFailedAttemptsVO(3),
+]);
 
-        $record = SendRecurringRecord::from([
-            'interval_seconds' => 604800,
-            'start_at' => new NotificationDateTimeVO('2026-07-08 09:00:00'),
-            'end_at' => new NotificationDateTimeVO('2026-12-31 09:00:00'),
-            'channels' => [MailChannel::class],
-            'limit_per_channel' => 1,
-            'max_attempts' => new MaxFailedAttemptsVO(3),
-        ]);
-
-        $alias = $this->service->sendRecurring($user, $message, $record);
-
-        return response()->json([
-            'message' => 'Newsletter planifiée chaque lundi à 9h',
-            'task_alias' => $alias->getValue(),
-        ]);
-    }
-}
+$alias = $this->service->sendRecurring($user, $message, $record);
 ```
 
 ---
 
 ## Filtrage des destinations avec SendOptions
 
-`SendOptions` permet un contrôle précis des destinations par canal.
-
 ```php
-<?php
-
 use AndyDefer\LaravelNotification\Options\SendOptions;
-use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Channels\PusherChannel;
 
 $options = SendOptions::init()
     ->withChannel(MailChannel::class)
@@ -427,39 +371,12 @@ $results = $notificationService
     ->sendNow($user, $message);
 ```
 
-### Filtres multiples par canal
-
-```php
-$options = SendOptions::init()
-    ->withChannel(MailChannel::class)
-    ->withDestinationFilter(MailChannel::class, [
-        'user@example.com',
-        'admin@example.com',
-        'support@example.com',
-    ]);
-```
-
-### Filtres sur plusieurs canaux
-
-```php
-$options = SendOptions::init()
-    ->withChannels([MailChannel::class, PusherChannel::class])
-    ->withDestinationFilter(MailChannel::class, 'pro@example.com')
-    ->withDestinationFilter(PusherChannel::class, 'private-user.42');
-```
-
 ---
 
 ## NotifiableBuilder - Envoi sans entité
 
-Le `NotifiableBuilder` permet d'envoyer des notifications **sans implémenter `NotifiableInterface`**.
-
 ```php
-<?php
-
 use AndyDefer\LaravelNotification\Builders\NotifiableBuilder;
-use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Channels\PusherChannel;
 
 $results = NotifiableBuilder::create()
     ->to(MailChannel::class, 'user@example.com')
@@ -470,89 +387,19 @@ $results = NotifiableBuilder::create()
     ->sendNow();
 ```
 
-### Envoi à plusieurs destinations
-
-```php
-$results = NotifiableBuilder::create()
-    ->to(MailChannel::class, [
-        'user1@example.com',
-        'user2@example.com',
-    ])
-    ->subject('Newsletter')
-    ->body('Contenu de la newsletter')
-    ->limit(2)
-    ->sendNow();
-```
-
-### Envoi différé
-
-```php
-$alias = NotifiableBuilder::create()
-    ->to(MailChannel::class, 'user@example.com')
-    ->subject('Rappel')
-    ->body('N\'oubliez pas votre rendez-vous demain.')
-    ->sendLater(1800);
-```
-
-### API du NotifiableBuilder
-
-| Méthode | Description | Retour |
-|---------|-------------|--------|
-| `static create(?NotificationService $service): self` | Crée une instance | `self` |
-| `to(string $channelClass, string|array $destination): self` | Définit la destination | `self` |
-| `body(string|MessageBodyVO $body): self` | Corps du message | `self` |
-| `subject(string $subject): self` | Sujet du message | `self` |
-| `type(string $type): self` | Type du message | `self` |
-| `data(array $data): self` | Données supplémentaires | `self` |
-| `limit(int $limit): self` | Limite par canal | `self` |
-| `filter(string $channelClass, string|array $destinations): self` | Filtre de destination | `self` |
-| `metadata(string $channelClass, StrictDataObject $metadata): self` | Métadonnées par canal | `self` |
-| `as(string $morphClass, int|string $key): self` | Classe morph + clé | `self` |
-| `sendNow(?SendNowRecord $record): SendResultCollection` | Envoi immédiat | `SendResultCollection` |
-| `sendLater(int $delaySeconds): TaskAliasVO` | Envoi différé | `TaskAliasVO` |
-| `sendAt(NotificationDateTimeVO $scheduledAt): TaskAliasVO` | Envoi planifié | `TaskAliasVO` |
-| `sendRecurring(int $intervalSeconds, NotificationDateTimeVO $startAt, ?NotificationDateTimeVO $endAt): TaskAliasVO` | Envoi récurrent | `TaskAliasVO` |
-| `reset(): self` | Réinitialise le builder | `self` |
-
 ---
 
 ## MessageViewBodyVO - Corps de message basé sur une vue Laravel
 
-`MessageViewBodyVO` étend `MessageBodyVO` et permet de définir le corps d'un message à partir d'une vue Laravel.
-
-### Constructeur
-
-```php
-public function __construct(
-    string $view,
-    StrictAssociative|array $data = [],
-    StrictAssociative|array $mergeData = [],
-    bool $plainText = false,
-)
-```
-
-### Création HTML (Email)
-
 ```php
 use AndyDefer\LaravelNotification\ValueObjects\MessageViewBodyVO;
 
-$body = MessageViewBodyVO::from([
-    'view' => 'emails.welcome',
-    'data' => ['user' => $user],
-]);
-
-// Ou via helper
 $body = MessageViewBodyVO::html(
     view: 'emails.welcome',
     data: ['user' => $user]
 );
-```
 
-### Conversion (immuable)
-
-```php
-$htmlBody = MessageViewBodyVO::html('notifications.reminder', ['user' => $user]);
-$finalBody = $htmlBody->withData(['extra' => 'value']);
+$finalBody = $body->withData(['extra' => 'value']);
 ```
 
 ---
@@ -560,12 +407,6 @@ $finalBody = $htmlBody->withData(['extra' => 'value']);
 ## Gestion des tâches
 
 ```php
-<?php
-
-namespace App\Services;
-
-use AndyDefer\LaravelNotification\Services\NotificationService;
-
 class TaskManager
 {
     public function __construct(
@@ -599,55 +440,16 @@ class TaskManager
 ## Statistiques et rapports
 
 ```php
-<?php
+$stats = $this->service->getStats($user);
 
-class StatsController extends Controller
-{
-    public function __construct(
-        private readonly NotificationService $service
-    ) {}
-
-    public function userStats(User $user)
-    {
-        $stats = $this->service->getStats($user);
-
-        return response()->json([
-            'total' => $stats->total,
-            'sent' => $stats->sent,
-            'failed' => $stats->failed,
-            'delivered' => $stats->delivered,
-            'pending' => $stats->pending,
-            'success_rate' => $stats->success_rate . '%',
-            'percentage_sent' => $stats->getPercentageSent(),
-            'percentage_failed' => $stats->getPercentageFailed(),
-        ]);
-    }
-
-    public function sessionStats(string $sessionId)
-    {
-        $sessionStats = $this->service->getSessionStats($sessionId);
-
-        return response()->json([
-            'session_id' => $sessionStats->session_id,
-            'total' => $sessionStats->total,
-            'sent' => $sessionStats->sent,
-            'failed' => $sessionStats->failed,
-            'pending' => $sessionStats->pending,
-        ]);
-    }
-}
-```
-
-### NotificationStatsVO
-
-```php
-$stats = $service->getStats($user);
-
-$stats->success_rate;              // 75.5
-$stats->getPercentageSent();       // 60.0
-$stats->getPercentageFailed();     // 40.0
-$stats->isSuccess();               // true
-$stats->hasFailures();             // false
+return response()->json([
+    'total' => $stats->total,
+    'sent' => $stats->sent,
+    'failed' => $stats->failed,
+    'delivered' => $stats->delivered,
+    'pending' => $stats->pending,
+    'success_rate' => $stats->success_rate . '%',
+]);
 ```
 
 ---
@@ -659,104 +461,559 @@ $stats->hasFailures();             // false
 | **MailChannel** | Email | 📧 | Envoi d'emails via Laravel Mail | ✅ |
 | **DatabaseChannel** | Base de données | 💾 | Persistance pour la traçabilité | ✅ |
 | **PusherChannel** | Pusher | 📡 | Diffusion temps réel via Pusher | ❌ |
+| **WebPushChannel** | Web Push (VAPID) | 🌐 | Notifications navigateur (W3C Push API) | ❌ |
+| **FirebaseCloudMessagingChannel** | FCM | 🔥 | Notifications mobiles (Android/iOS) | ❌ |
 
-### Configuration des canaux
+### Installation de chaque canal
+
+#### 1. MailChannel — Email
+
+**Prérequis :** `laravel/mail` configuré.
 
 ```php
 // config/notification.php
-return [
-    'channels' => [
-        'mail' => [
-            'enabled' => true,
-            'default_from' => env('MAIL_FROM_ADDRESS'),
-            'default_from_name' => env('MAIL_FROM_NAME'),
-        ],
-        'database' => [
-            'driver' => 'database',
-            'table' => 'notifications',
-        ],
-        'pusher' => [
-            'enabled' => env('PUSHER_NOTIFICATION_ENABLED', false),
-            'app_id' => env('PUSHER_APP_ID'),
-            'key' => env('PUSHER_APP_KEY'),
-            'secret' => env('PUSHER_APP_SECRET'),
-            'cluster' => env('PUSHER_APP_CLUSTER', 'eu'),
-            'use_tls' => env('PUSHER_USE_TLS', true),
-            'timeout' => env('PUSHER_TIMEOUT', 30),
-            'default_channel' => env('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
-        ],
+'channels' => [
+    'mail' => [
+        'enabled' => true,
+        'default_from' => env('MAIL_FROM_ADDRESS'),
+        'default_from_name' => env('MAIL_FROM_NAME'),
     ],
-];
+],
+```
+
+**Utilisation :**
+
+```php
+$record = SendNowRecord::from([
+    'channels' => [MailChannel::class],
+    'limit_per_channel' => 1,
+]);
+
+$results = $service->sendNow($user, $message, $record);
+```
+
+---
+
+#### 2. DatabaseChannel — Traçabilité
+
+**Prérequis :** migrations publiées et exécutées.
+
+```bash
+php artisan vendor:publish --tag=notification-migrations
+php artisan migrate
+```
+
+**Utilisation :**
+
+```php
+$collection->add(new NotificationRouteVO(
+    DatabaseChannel::class,
+    'database'
+));
+```
+
+**Bénéfice :** une ligne est insérée pour chaque tentative, avec `status`, `channel`, `destination`, `error_message`.
+
+---
+
+#### 3. PusherChannel — Temps réel
+
+**Configuration :**
+
+```php
+// config/notification.php
+'pusher' => [
+    'enabled' => env('PUSHER_NOTIFICATION_ENABLED', false),
+    'app_id' => env('PUSHER_APP_ID'),
+    'key' => env('PUSHER_APP_KEY'),
+    'secret' => env('PUSHER_APP_SECRET'),
+    'cluster' => env('PUSHER_APP_CLUSTER', 'eu'),
+    'use_tls' => env('PUSHER_USE_TLS', true),
+    'timeout' => env('PUSHER_TIMEOUT', 30),
+    'default_channel' => env('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
+],
+```
+
+**Utilisation :**
+
+```php
+$collection->add(new NotificationRouteVO(
+    PusherChannel::class,
+    "private-user.{$this->id}",
+    new StrictDataObject(['event' => 'notification.received'])
+));
+```
+
+**Côté client (Laravel Echo) :**
+
+```ts
+Echo.private(`user.${userId}`)
+    .listen('.notification.received', (payload) => {
+        console.log(payload.body, payload.subject, payload.data);
+    });
+```
+
+---
+
+#### 4. WebPushChannel — Notifications navigateur
+
+**Génération des clés VAPID :**
+
+```bash
+./vendor/bin/directive notification:generate-vapid
+```
+
+Cette directive écrit dans `.env` :
+
+```env
+WEBPUSH_PUBLIC_KEY=BDw92Y6vnPXYNN90QwiqmLAnnEX9...
+WEBPUSH_PRIVATE_KEY=m7lTHzndL5P7QL0be8a0l1whYsy8...
+WEBPUSH_NOTIFICATION_ENABLED=true
+WEBPUSH_SUBJECT="mailto:contact@afya-medical.com"
+```
+
+**Configuration :**
+
+```php
+// config/notification.php
+'webpush' => [
+    'enabled' => env('WEBPUSH_NOTIFICATION_ENABLED', false),
+    'subject' => env('WEBPUSH_SUBJECT'),
+    'public_key' => env('WEBPUSH_PUBLIC_KEY'),
+    'private_key' => env('WEBPUSH_PRIVATE_KEY'),
+    'ttl' => env('WEBPUSH_TTL', 3600),
+    'urgency' => env('WEBPUSH_URGENCY', 'normal'),
+    'topic' => env('WEBPUSH_TOPIC', 'notification'),
+],
+```
+
+**Migration :**
+
+```bash
+php artisan vendor:publish --tag=notification-migrations
+php artisan migrate
+```
+
+**Modèle `WebPushSubscription` :**
+
+```php
+final class WebPushSubscription extends Model implements NotifiableInterface, PingableInterface
+{
+    use HasPingPong;
+    use HasUuids;
+
+    protected $table = 'web_push_subscriptions';
+    protected $keyType = 'string';
+    public $incrementing = false;
+
+    protected $fillable = [
+        'id', 'endpoint', 'p256dh', 'auth', 'browser',
+        'user_agent', 'last_seen_at', 'notifiable_type', 'notifiable_id',
+    ];
+
+    protected $casts = ['last_seen_at' => 'immutable_datetime'];
+
+    public function notifiable(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    public function getNotificationChannels(): NotificationRouteCollection
+    {
+        $collection = new NotificationRouteCollection;
+
+        $collection->add(new NotificationRouteVO(
+            channelClass: WebPushChannel::class,
+            destination: (string) $this->endpoint,
+            metadata: new StrictDataObject([
+                'type' => 'webpush',
+                'endpoint' => (string) $this->endpoint,
+                'p256dh' => (string) $this->p256dh,
+                'auth' => (string) $this->auth,
+            ]),
+        ));
+
+        return $collection;
+    }
+}
+```
+
+**Utilisation :**
+
+```php
+$record = SendNowRecord::from([
+    'channels' => [WebPushChannel::class],
+    'limit_per_channel' => 1,
+]);
+
+$results = $service->sendNow($subscription, $message, $record);
+```
+
+**Enregistrement côté API :**
+
+```bash
+POST /notification/register-webpush-subscription
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "endpoint": "https://jmt17.google.com/fcm/send/...",
+    "p256dh": "BGtKsvWiILk_...",
+    "auth": "hv_Nwds7IHarbxh2KChgEw"
+}
+```
+
+**Service worker côté navigateur :**
+
+```js
+self.addEventListener('push', (event) => {
+    const payload = event.data ? event.data.json() : {};
+
+    // Log dans le service worker
+    console.log('[webpush-sw] push received', payload);
+
+    // Notifier les pages ouvertes
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then((wins) => {
+            for (const win of wins) {
+                win.postMessage({ type: 'WEBPUSH_RECEIVED', payload });
+            }
+        });
+
+    // Afficher la notification système
+    event.waitUntil(self.registration.showNotification(
+        payload.title ?? 'Notification',
+        {
+            body: payload.body ?? '',
+            data: payload.data ?? {},
+            icon: '/icon.png',
+            badge: '/badge.png',
+        }
+    ));
+});
+```
+
+**Écoute côté page :**
+
+```js
+navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'WEBPUSH_RECEIVED') {
+        console.log("j'ai reçu un web push", event.data.payload);
+    }
+});
+```
+
+---
+
+#### 5. FirebaseCloudMessagingChannel — Mobile
+
+**Prérequis :**
+
+```bash
+composer require google/auth guzzlehttp/guzzle
+```
+
+**Configuration :**
+
+```php
+// config/notification.php
+'firebase' => [
+    'enabled' => env('FIREBASE_NOTIFICATION_ENABLED', false),
+    'credentials_path' => env('FIREBASE_CREDENTIALS_PATH'),
+    'project_id' => env('FIREBASE_PROJECT_ID'),
+    'scope' => env('FIREBASE_SCOPE', 'https://www.googleapis.com/auth/firebase.messaging'),
+    'timeout' => env('FIREBASE_TIMEOUT', 30),
+],
+```
+
+**Modèle `FcmDevice` :**
+
+```php
+final class FcmDevice extends Model implements NotifiableInterface, PingableInterface
+{
+    use HasPingPong;
+    use HasUuids;
+
+    protected $table = 'fcm_devices';
+    protected $keyType = 'string';
+    public $incrementing = false;
+
+    protected $fillable = [
+        'id', 'device_id', 'token', 'platform', 'user_agent',
+        'last_seen_at', 'notifiable_type', 'notifiable_id',
+    ];
+
+    protected $casts = ['last_seen_at' => 'immutable_datetime'];
+
+    public function notifiable(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    public function getNotificationChannels(): NotificationRouteCollection
+    {
+        $collection = new NotificationRouteCollection;
+
+        $collection->add(new NotificationRouteVO(
+            channelClass: FirebaseCloudMessagingChannel::class,
+            destination: (string) $this->token,
+            metadata: new StrictDataObject([
+                'type' => 'fcm',
+                'device_id' => (string) $this->device_id,
+            ]),
+        ));
+
+        return $collection;
+    }
+}
+```
+
+**Enregistrement côté API :**
+
+```bash
+POST /notification/register-fcm-device
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "device_id": "550e8400-e29b-41d4-a716-446655440000",
+    "token": "eQhyKer9t_jperz7AYDDVB:APA91b...",
+    "platform": "android"
+}
+```
+
+**Utilisation :**
+
+```php
+$record = SendNowRecord::from([
+    'channels' => [FirebaseCloudMessagingChannel::class],
+    'limit_per_channel' => 1,
+]);
+
+$results = $service->sendNow($device, $message, $record);
 ```
 
 ---
 
 ## Drivers fonctionnels
 
-Les drivers sont responsables de l'exécution réelle de l'envoi. Chaque canal possède son driver.
-
 | Driver | Canal | Dépendance externe | Comportement |
 |--------|-------|--------------------|--------------|
-| **MailDriver** | `MailChannel` | Laravel Mail | Utilise `Mail::to(...)->send(...)`. Supporte `from` / `from_name` via metadata de route. |
-| **DatabaseDriver** | `DatabaseChannel` | Base de données | Insère une ligne par notification. Table configurable via `notification.channels.database.table`. |
-| **PusherDriver** | `PusherChannel` | `pusher/pusher-php-server` | Publie un événement via `Pusher::trigger()`. Supporte `channel` et `event` via metadata de route. |
+| **MailDriver** | `MailChannel` | Laravel Mail | Utilise `Mail::to(...)->send(...)` |
+| **DatabaseDriver** | `DatabaseChannel` | Base de données | Insère une ligne par notification |
+| **PusherDriver** | `PusherChannel` | `pusher/pusher-php-server` | Publie un événement via `Pusher::trigger()` |
+| **WebPushDriver** | `WebPushChannel` | `minishlink/web-push` | Envoie via W3C Push API + VAPID |
+| **FirebaseCloudMessagingDriver** | `FirebaseCloudMessagingChannel` | HTTP client | Publie sur l'API HTTP v1 de FCM |
 
-### MailDriver — points clés
+### WebPushDriver — points clés
 
-- Configuration : `MailConfigRecord` (enabled, default_from, default_from_name).
-- Surcharge possible par route via metadata `from` et `from_name`.
-- Le rendu HTML est géré par `MessageBodyVO` ou `MessageViewBodyVO`.
-- Les erreurs SMTP sont capturées et transformées en `error_message` du `SendResultRecord`.
+- Configuration : `WebPushConfigRecord` (enabled, subject, public_key, private_key, ttl, urgency, topic).
+- Métadonnées obligatoires par route : `endpoint`, `p256dh`, `auth`.
+- Métadonnées optionnelles : `title`, `data`.
+- Payload fusionné : `metadata.data` + `message.data`.
+- Toute erreur d'envoi lève une `RuntimeException` capturée en `error_message` du `SendResultRecord`.
 
-### DatabaseDriver — points clés
+### FirebaseCloudMessagingDriver — points clés
 
-- Configuration : `DatabaseConfigRecord` (driver, table).
-- Toujours actif, garantit la traçabilité.
-- Une ligne par notification envoyée, avec statut `SENT`, `FAILED`, `DELIVERED` ou `PENDING`.
-- Recommandé dans **tous** les modèles `NotifiableInterface`.
+- Configuration : `FirebaseCloudMessagingConfigRecord` (enabled, credentials_path, project_id, scope, timeout).
+- Authentification via OAuth 2.0 (`google/auth`).
+- Résolution du token : `metadata.token` ou `destination`.
+- Payload FCM : `title`, `body`, `data`, `type`.
 
-### PusherDriver — points clés
+---
 
-- Configuration : `PusherConfigRecord` (enabled, app_id, key, secret, cluster, use_tls, timeout, default_channel).
-- Résolution du channel : `metadata['channel']` > `destination` > `default_channel`.
-- Résolution de l'événement : `metadata['event']` > `notification`.
-- Payload diffusé : `body`, `subject`, `type`, `data`, `sent_at`.
-- Client Pusher instancié en lazy et mémoïsé.
+## Ping/Pong — Vérification et nettoyage des cibles
 
-### Exemple d'envoi multi-drivers
+Le module **Ping/Pong** permet de vérifier qu'un appareil FCM ou une souscription Web Push est toujours valide, et de le supprimer automatiquement sinon.
+
+### Principe
+
+1. Une notification légère (`ping`) est envoyée via le canal cible.
+2. Le résultat est interprété :
+   - **Succès** → la cible est valide → `PingStatus::PONG`, `last_seen_at` mis à jour.
+   - **Échec** → la cible est invalide → `PingStatus::INVALID` → suppression.
+3. Aucun parsing de message d'erreur n'est effectué : tout échec = invalide.
+
+### Contrat `PingPongInterface`
 
 ```php
-<?php
-
-use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
-use AndyDefer\LaravelNotification\Channels\PusherChannel;
-use AndyDefer\LaravelNotification\Records\SendNowRecord;
-use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
-use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
-
-$message = new NotificationMessageVO(
-    body: new MessageBodyVO('<h1>Commande confirmée</h1>'),
-    subject: new MessageSubjectVO('Commande #42 confirmée'),
-    type: 'order_confirmation',
-);
-
-$record = SendNowRecord::from([
-    'channels' => [
-        MailChannel::class,
-        PusherChannel::class,
-        DatabaseChannel::class,
-    ],
-    'limit_per_channel' => 1,
-]);
-
-$results = $service->sendNow($user, $message, $record);
-
-// → Mail envoyé
-// → Événement Pusher diffusé
-// → Notification tracée en base
+interface PingPongInterface
+{
+    public function ping(Model $notifiable): PingStatus;
+    public function isAlive(Model $notifiable): bool;
+    public function pingOrPrune(Model $notifiable): PingStatus;
+}
 ```
+
+### Enum `PingStatus`
+
+```php
+enum PingStatus: string
+{
+    case PONG = 'pong';
+    case INVALID = 'invalid';
+
+    public function isPong(): bool;
+    public function isInvalid(): bool;
+}
+```
+
+### Trait `HasPingPong`
+
+À utiliser dans tous les modèles notifiables (FCM, Web Push) :
+
+```php
+final class FcmDevice extends Model implements NotifiableInterface, PingableInterface
+{
+    use HasPingPong;
+    // ...
+}
+
+final class WebPushSubscription extends Model implements NotifiableInterface, PingableInterface
+{
+    use HasPingPong;
+    // ...
+}
+```
+
+Le trait délègue la résolution du helper au `PingPongAdapter`.
+
+### `PingPongAdapter`
+
+Associe chaque modèle à son helper :
+
+```php
+final class PingPongAdapter
+{
+    private const HELPERS = [
+        FcmDevice::class => FcmPingPong::class,
+        WebPushSubscription::class => WebPushPingPong::class,
+    ];
+
+    public function for(Model $model): PingPongInterface;
+}
+```
+
+### Utilisation
+
+```php
+// Vérifier une cible
+if ($subscription->isAlive()) {
+    // Toujours joignable
+}
+
+// Vérifier et supprimer si invalide
+$status = $subscription->pingOrPrune();
+
+if ($status->isInvalid()) {
+    logger()->info('Subscription pruned', ['id' => $subscription->id]);
+}
+```
+
+### Helpers disponibles
+
+| Helper | Canal cible | Suppression automatique |
+|--------|-------------|-------------------------|
+| `FcmPingPong` | FCM | ✅ via `pingOrPrune` |
+| `WebPushPingPong` | Web Push | ✅ via `pingOrPrune` |
+
+---
+
+## Directives CLI
+
+Le package expose plusieurs directives pour l'installation et la maintenance.
+
+### `notification:generate-vapid`
+
+Génère une paire de clés VAPID et l'écrit dans un fichier `.env`.
+
+```bash
+./vendor/bin/directive notification:generate-vapid
+./vendor/bin/directive notification:generate-vapid .env.production
+./vendor/bin/directive notification:generate-vapid --force
+```
+
+**Alias :** `notification:gvk`, `n:gvk`
+
+| Argument / Option | Description |
+|-------------------|-------------|
+| `env` | Chemin du fichier env (défaut : `.env`) |
+| `--force` | Écrase les clés existantes |
+
+---
+
+### `notification:register-prune-fcm`
+
+Enregistre la tâche récurrente de nettoyage des appareils FCM invalides.
+
+```bash
+./vendor/bin/directive notification:register-prune-fcm
+./vendor/bin/directive notification:register-prune-fcm 3600 5
+./vendor/bin/directive notification:register-prune-fcm --force
+```
+
+**Alias :** `notification:rpf`, `n:rpf`
+
+| Argument / Option | Défaut | Description |
+|-------------------|--------|-------------|
+| `interval` | `1800` | Intervalle en secondes (minimum 60) |
+| `maxAttempts` | `3` | Nombre maximum de tentatives (minimum 1) |
+| `--force` | `false` | Ré-enregistre la tâche même si elle existe |
+
+---
+
+### `notification:register-prune-webpush`
+
+Enregistre la tâche récurrente de nettoyage des souscriptions Web Push invalides.
+
+```bash
+./vendor/bin/directive notification:register-prune-webpush
+./vendor/bin/directive notification:register-prune-webpush 3600 5
+./vendor/bin/directive notification:register-prune-webpush --force
+```
+
+**Alias :** `notification:rpwp`, `n:rpwp`
+
+| Argument / Option | Défaut | Description |
+|-------------------|--------|-------------|
+| `interval` | `1800` | Intervalle en secondes (minimum 60) |
+| `maxAttempts` | `3` | Nombre maximum de tentatives (minimum 1) |
+| `--force` | `false` | Ré-enregistre la tâche même si elle existe |
+
+---
+
+## Tâches internes
+
+Le package utilise `andydefer/laravel-task` pour planifier et exécuter les tâches différées, récurrentes et de nettoyage.
+
+| Tâche | Type | Rôle |
+|-------|------|------|
+| `SendDelayedNotificationTask` | Unique | Envoi différé/planifié |
+| `SendRecurringNotificationTask` | Récurrente | Envoi périodique |
+| `PingAndPruneFcmDeviceTask` | Unique | Ping + suppression d'un appareil FCM |
+| `PingAndPruneWebPushSubscriptionTask` | Unique | Ping + suppression d'une souscription Web Push |
+| `PruneFailedFcmNotificationsTask` | Récurrente | Scan des notifications FCM échouées → planification des ping/prune |
+| `PruneFailedWebPushNotificationsTask` | Récurrente | Scan des notifications Web Push échouées → planification des ping/prune |
+
+### Fonctionnement du nettoyage
+
+```
+PruneFailedFcmNotificationsTask (récurrente, toutes les 30 min)
+    ↓
+Scan des Notification FAILED pour FirebaseCloudMessagingChannel
+    ↓
+Pour chaque Notification :
+    ├── Résolution du notifiable
+    ├── Récupération des FcmDevice associés
+    └── Planification d'un PingAndPruneFcmDeviceTask par device
+                ↓
+        PingAndPruneFcmDeviceTask (unique)
+            ├── Appel FcmPingPong::pingOrPrune()
+            ├── PONG → last_seen_at mis à jour
+            └── INVALID → appareil supprimé
+```
+
+La même logique s'applique à Web Push via `PruneFailedWebPushNotificationsTask`.
 
 ---
 
@@ -765,21 +1022,9 @@ $results = $service->sendNow($user, $message, $record);
 ### 1. Créer le Driver
 
 ```php
-<?php
-
-namespace App\Notifications\Drivers;
-
-use AndyDefer\LaravelNotification\Abstracts\AbstractDriver;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
-use Illuminate\Support\Facades\Http;
-use RuntimeException;
-
 class DiscordDriver extends AbstractDriver
 {
-    public function __construct(
-        private readonly array $config
-    ) {}
+    public function __construct(private readonly array $config) {}
 
     public function getChannel(): string
     {
@@ -798,10 +1043,6 @@ class DiscordDriver extends AbstractDriver
         $webhookUrl = $route->getMetadata()?->get('webhook_url')
             ?? $this->config['webhook_url'];
 
-        if (!$webhookUrl) {
-            throw new RuntimeException('Discord webhook URL not specified.');
-        }
-
         $response = Http::post($webhookUrl, [
             'content' => $message->getBodyValue(),
         ]);
@@ -818,33 +1059,11 @@ class DiscordDriver extends AbstractDriver
 ### 2. Créer le Channel
 
 ```php
-<?php
-
-namespace App\Notifications\Channels;
-
-use AndyDefer\LaravelNotification\Abstracts\AbstractChannel;
-use AndyDefer\LaravelNotification\Abstracts\AbstractDriver;
-use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
-use App\Notifications\Drivers\DiscordDriver;
-use App\Notifications\Records\DiscordConfigRecord;
-use Illuminate\Contracts\Config\Repository as ConfigRepository;
-
 class DiscordChannel extends AbstractChannel
 {
-    public function getName(): string
-    {
-        return 'discord';
-    }
-
-    public function getLabel(): string
-    {
-        return 'Discord';
-    }
-
-    public function getIcon(): string
-    {
-        return '🎮';
-    }
+    public function getName(): string { return 'discord'; }
+    public function getLabel(): string { return 'Discord'; }
+    public function getIcon(): string { return '🎮'; }
 
     public function isEnabled(): bool
     {
@@ -853,20 +1072,14 @@ class DiscordChannel extends AbstractChannel
 
     public function getConfig(): AbstractRecord
     {
-        $config = $this->configRepository->get('notification.channels.discord', [
-            'enabled' => false,
-            'webhook_url' => env('DISCORD_WEBHOOK_URL'),
-        ]);
-
-        return DiscordConfigRecord::from($config);
+        return DiscordConfigRecord::from(
+            $this->configRepository->get('notification.channels.discord', [])
+        );
     }
 
     public function createDriver(): AbstractDriver
     {
-        /** @var DiscordConfigRecord $config */
-        $config = $this->getConfig();
-
-        return new DiscordDriver($config->toArray());
+        return new DiscordDriver($this->getConfig()->toArray());
     }
 
     public static function validateDestination(string $destination): bool
@@ -880,12 +1093,6 @@ class DiscordChannel extends AbstractChannel
 ### 3. Créer le Record de Configuration
 
 ```php
-<?php
-
-namespace App\Notifications\Records;
-
-use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
-
 final class DiscordConfigRecord extends AbstractRecord
 {
     public function __construct(
@@ -934,7 +1141,7 @@ class Doctor extends Model implements NotifiableInterface
 }
 ```
 
-### 2. E-commerce
+### 2. E-commerce multi-canal
 
 ```php
 class Order extends Model implements NotifiableInterface
@@ -943,47 +1150,57 @@ class Order extends Model implements NotifiableInterface
     {
         $collection = new NotificationRouteCollection;
 
-        $collection->add(new NotificationRouteVO(
-            MailChannel::class,
-            $this->customer_email
-        ));
+        $collection->add(new NotificationRouteVO(MailChannel::class, $this->customer_email));
+        $collection->add(new NotificationRouteVO(PusherChannel::class, "private-order.{$this->id}"));
 
-        $collection->add(new NotificationRouteVO(
-            PusherChannel::class,
-            "private-order.{$this->id}"
-        ));
+        foreach ($this->customer->webPushSubscriptions as $subscription) {
+            $collection->add(new NotificationRouteVO(
+                WebPushChannel::class,
+                $subscription->endpoint,
+                new StrictDataObject([
+                    'endpoint' => $subscription->endpoint,
+                    'p256dh' => $subscription->p256dh,
+                    'auth' => $subscription->auth,
+                ])
+            ));
+        }
+
+        foreach ($this->customer->fcmDevices as $device) {
+            $collection->add(new NotificationRouteVO(
+                FirebaseCloudMessagingChannel::class,
+                $device->token,
+                new StrictDataObject([
+                    'device_id' => $device->device_id,
+                ])
+            ));
+        }
 
         return $collection;
     }
 }
 ```
 
-### 3. Temps réel mobile / web avec Pusher
+### 3. Notification temps réel + push
 
 ```php
-use AndyDefer\LaravelNotification\Channels\PusherChannel;
-use AndyDefer\DomainStructures\Utils\StrictDataObject;
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('Votre commande a été expédiée.'),
+    subject: new MessageSubjectVO('Commande expédiée'),
+    type: 'order_shipped',
+    data: new StrictDataObject(['order_id' => 42, 'url' => '/orders/42']),
+);
 
-// Modèle
-$collection->add(new NotificationRouteVO(
-    PusherChannel::class,
-    "private-user.{$this->id}",
-    new StrictDataObject(['event' => 'notification.received'])
-));
-
-// Envoi
-$service->sendNow($user, $message, SendNowRecord::from([
-    'channels' => [PusherChannel::class],
+$record = SendNowRecord::from([
+    'channels' => [
+        PusherChannel::class,
+        WebPushChannel::class,
+        FirebaseCloudMessagingChannel::class,
+        DatabaseChannel::class,
+    ],
     'limit_per_channel' => 1,
-]));
-```
+]);
 
-```ts
-// Frontend Laravel Echo + Pusher
-Echo.private(`user.${userId}`)
-    .listen('.notification.received', (payload) => {
-        console.log(payload.body, payload.subject, payload.data);
-    });
+$results = $service->sendNow($order->customer, $message, $record);
 ```
 
 ---
@@ -1037,6 +1254,14 @@ $record = SendNowRecord::from([
 ]);
 ```
 
+### ✅ Vérifier périodiquement les cibles push
+
+```bash
+# Enregistrer les tâches de nettoyage
+./vendor/bin/directive notification:register-prune-fcm
+./vendor/bin/directive notification:register-prune-webpush
+```
+
 ### ✅ Gérer les erreurs proprement
 
 ```php
@@ -1062,13 +1287,6 @@ Le trait `HasNotifications` fournit une API riche pour les modèles Eloquent qui
 ### Installation
 
 ```php
-<?php
-
-namespace App\Models;
-
-use AndyDefer\LaravelNotification\Traits\HasNotifications;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-
 final class User extends Authenticatable
 {
     use HasNotifications;
@@ -1087,7 +1305,6 @@ final class User extends Authenticatable
 | `failed_notifications` | `Collection` | Notifications échouées |
 | `latest_notifications` | `Collection` | 10 dernières notifications |
 | `database_notifications` | `Collection` | Notifications du canal `DatabaseChannel` |
-| `latest_database_notifications` | `Collection` | 10 dernières notifications du canal `DatabaseChannel` |
 | `has_unread_notifications` | `bool` | Y a-t-il des non lues ? |
 | `has_notifications` | `bool` | Y a-t-il au moins une notification ? |
 
@@ -1121,7 +1338,7 @@ final class User extends Authenticatable
 | `pause(string $signature): bool` | Pause | `bool` |
 | `resume(string $signature): bool` | Reprise | `bool` |
 | `changeInterval(string $signature, int $newIntervalSeconds): bool` | Change l'intervalle | `bool` |
-| `getStats(NotifiableInterface&Model $notifiable): NotificationStatsVO` | Statistiques | `NotificationStatsVO` |
+| `getStats(NotifiableInterface&Model): NotificationStatsVO` | Statistiques | `NotificationStatsVO` |
 | `getSessionStats(string $sessionId): SessionStatsRecord` | Stats de session | `SessionStatsRecord` |
 
 ### SendResultCollection
@@ -1153,15 +1370,20 @@ final class User extends Authenticatable
 | `isSuccess(): bool` | Tout a réussi |
 | `hasFailures(): bool` | Au moins un échec |
 
-### SessionStatsRecord
+### PingStatus
 
-| Propriété | Description |
-|-----------|-------------|
-| `session_id: string` | ID de session |
-| `total: int` | Total |
-| `sent: int` | Nombre de `SENT` |
-| `failed: int` | Nombre de `FAILED` |
-| `pending: int` | Nombre de `PENDING` |
+| Case | Description |
+|------|-------------|
+| `PONG` | La cible est valide |
+| `INVALID` | La cible est invalide (à supprimer) |
+
+### PingPongInterface
+
+| Méthode | Description |
+|---------|-------------|
+| `ping(Model $notifiable): PingStatus` | Envoie un ping |
+| `isAlive(Model $notifiable): bool` | Retourne `true` si PONG |
+| `pingOrPrune(Model $notifiable): PingStatus` | Ping + suppression si invalide |
 
 ---
 

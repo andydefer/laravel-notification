@@ -78,16 +78,16 @@ final class FcmPingPongTest extends TestCase
         $this->assertSame(PingStatus::INVALID, $status);
     }
 
-    public function test_ping_returns_unreachable_when_driver_config_is_missing(): void
+    public function test_ping_returns_invalid_when_driver_config_is_missing(): void
     {
-        // Force une erreur de config → pas d'UNREGISTERED → UNREACHABLE.
+        // Force une erreur de config → envoi échoue → INVALID.
         $this->app['config']->set('notification.channels.firebase.enabled', false);
 
         $device = $this->makeDevice(str_repeat('a', 200));
 
         $status = $this->pingPong->ping($device);
 
-        $this->assertSame(PingStatus::UNREACHABLE, $status);
+        $this->assertSame(PingStatus::INVALID, $status);
     }
 
     public function test_is_alive_returns_true_when_pong(): void
@@ -130,7 +130,7 @@ final class FcmPingPongTest extends TestCase
         $this->assertDatabaseHas('fcm_devices', ['id' => $deviceId]);
     }
 
-    public function test_ping_or_prune_keeps_device_when_unreachable(): void
+    public function test_ping_or_prune_deletes_device_when_config_is_missing(): void
     {
         $this->app['config']->set('notification.channels.firebase.enabled', false);
 
@@ -139,8 +139,8 @@ final class FcmPingPongTest extends TestCase
 
         $status = $this->pingPong->pingOrPrune($device);
 
-        $this->assertSame(PingStatus::UNREACHABLE, $status);
-        $this->assertDatabaseHas('fcm_devices', ['id' => $deviceId]);
+        $this->assertSame(PingStatus::INVALID, $status);
+        $this->assertDatabaseMissing('fcm_devices', ['id' => $deviceId]);
     }
 
     public function test_device_ping_method_delegates_to_helper(): void

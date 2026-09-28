@@ -1,7 +1,5 @@
 <?php
 
-// src/Configs/NotificationConfig.php
-
 declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Configs;
@@ -16,6 +14,7 @@ use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
 use AndyDefer\LaravelNotification\Records\SlackConfigRecord;
 use AndyDefer\LaravelNotification\Records\SmsConfigRecord;
 use AndyDefer\LaravelNotification\Records\TelegramConfigRecord;
+use AndyDefer\LaravelNotification\Records\WebPushConfigRecord;
 use AndyDefer\LaravelNotification\Records\WhatsAppConfigRecord;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 
@@ -105,6 +104,16 @@ final class NotificationConfig implements NotificationConfigInterface
         'default_channel' => 'notifications',
     ];
 
+    private const DEFAULT_WEBPUSH_CONFIG = [
+        'enabled' => false,
+        'subject' => null,
+        'public_key' => null,
+        'private_key' => null,
+        'ttl' => 3600,
+        'urgency' => 'normal',
+        'topic' => 'notification',
+    ];
+
     private const DEFAULT_LOGGING_CONFIG = [
         'enabled' => true,
         'channel' => 'daily',
@@ -183,9 +192,33 @@ final class NotificationConfig implements NotificationConfigInterface
         ]);
     }
 
+    /**
+     * {@inheritDoc}
+     */
+    public function getWebPushConfig(): WebPushConfigRecord
+    {
+        $config = $this->config->get(
+            'notification.channels.webpush',
+            self::DEFAULT_WEBPUSH_CONFIG,
+        );
+
+        return WebPushConfigRecord::from($config);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function isFirebaseEnabled(): bool
     {
         return $this->getFirebaseConfig()->enabled;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function isWebPushEnabled(): bool
+    {
+        return $this->getWebPushConfig()->enabled;
     }
 
     /**
@@ -225,7 +258,6 @@ final class NotificationConfig implements NotificationConfigInterface
     {
         $config = $this->config->get('notification.channels.push', self::DEFAULT_PUSH_CONFIG);
 
-        // Convertir default_tokens en StrictDataObject si c'est un array
         if (isset($config['default_tokens']) && is_array($config['default_tokens'])) {
             $config['default_tokens'] = new StrictDataObject($config['default_tokens']);
         }
@@ -345,6 +377,10 @@ final class NotificationConfig implements NotificationConfigInterface
 
         if ($this->isPusherEnabled()) {
             $channels[] = 'pusher';
+        }
+
+        if ($this->isWebPushEnabled()) {
+            $channels[] = 'webpush';
         }
 
         return $channels;
