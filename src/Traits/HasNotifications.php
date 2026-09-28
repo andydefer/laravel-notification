@@ -6,10 +6,13 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Traits;
 
+use AndyDefer\DomainStructures\Collections\Utility\StringTypedCollection;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
+use AndyDefer\LaravelNotification\Models\FcmDevice;
 use AndyDefer\LaravelNotification\Models\Notification;
+use AndyDefer\LaravelNotification\Models\WebPushSubscription;
 use AndyDefer\LaravelNotification\Records\NotificationFilterRecord;
 use AndyDefer\Repository\Records\FindByRecord;
 use AndyDefer\Repository\ValueObjects\SortColumns;
@@ -21,8 +24,9 @@ use Illuminate\Support\Collection;
 /**
  * Trait for models that can receive notifications.
  *
- * Provides utility methods to interact with notifications.
- * Wraps the NotificationRepository to avoid duplicating logic.
+ * Provides utility methods to interact with notifications, FCM devices,
+ * and Web Push subscriptions. Wraps the NotificationRepository to avoid
+ * duplicating logic.
  *
  * @phpstan-require-extends Model
  *
@@ -41,6 +45,12 @@ use Illuminate\Support\Collection;
  * @property-read bool $has_unread_database_notifications
  * @property-read bool $has_unread_notifications
  * @property-read bool $has_notifications
+ * @property-read Collection<int, FcmDevice> $fcm_devices
+ * @property-read StringTypedCollection $fcm_tokens
+ * @property-read bool $has_fcm_devices
+ * @property-read Collection<int, WebPushSubscription> $web_push_subscriptions
+ * @property-read StringTypedCollection $web_push_endpoints
+ * @property-read bool $has_web_push_subscriptions
  */
 trait HasNotifications
 {
@@ -51,6 +61,80 @@ trait HasNotifications
     {
         /** @var Model $this */
         return $this->morphMany(Notification::class, 'notifiable');
+    }
+
+    /**
+     * Get all FCM devices owned by this model.
+     *
+     * @return MorphMany<FcmDevice>
+     */
+    public function fcmDevices(): MorphMany
+    {
+        /** @var Model $this */
+        return $this->morphMany(FcmDevice::class, 'notifiable');
+    }
+
+    /**
+     * Get all Web Push subscriptions owned by this model.
+     *
+     * @return MorphMany<WebPushSubscription>
+     */
+    public function webPushSubscriptions(): MorphMany
+    {
+        /** @var Model $this */
+        return $this->morphMany(WebPushSubscription::class, 'notifiable');
+    }
+
+    /**
+     * Get all FCM registration tokens owned by this model.
+     *
+     * @return Attribute<StringTypedCollection, never>
+     */
+    protected function fcmTokens(): Attribute
+    {
+        return Attribute::get(
+            fn (): StringTypedCollection => StringTypedCollection::from(
+                $this->fcmDevices()->pluck('token')->all(),
+            ),
+        );
+    }
+
+    /**
+     * Determine if this model has at least one FCM device registered.
+     *
+     * @return Attribute<bool, never>
+     */
+    protected function hasFcmDevices(): Attribute
+    {
+        return Attribute::get(
+            fn (): bool => $this->fcmDevices()->exists(),
+        );
+    }
+
+    /**
+     * Get all Web Push endpoints owned by this model.
+     *
+     * @return Attribute<StringTypedCollection, never>
+     */
+    protected function webPushEndpoints(): Attribute
+    {
+        return Attribute::get(
+            fn (): StringTypedCollection => StringTypedCollection::from(
+                $this->webPushSubscriptions()->pluck('endpoint')->all(),
+            ),
+        );
+    }
+
+    /**
+     * Determine if this model has at least one Web Push subscription.
+     *
+     * @return Attribute<bool, never>
+     */
+    protected function hasWebPushSubscriptions(): Attribute
+    {
+        return Attribute::get(
+            fn (): bool => $this->webPushSubscriptions()->exists(),
+        );
     }
 
     /**

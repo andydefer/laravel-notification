@@ -13,7 +13,6 @@ use AndyDefer\LaravelNotification\Channels\PusherChannel;
 use AndyDefer\LaravelNotification\Collections\NotificationRouteCollection;
 use AndyDefer\LaravelNotification\Contracts\NotifiableInterface;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Channels\TestChannel;
-use AndyDefer\LaravelNotification\Traits\HasFcmDevices;
 use AndyDefer\LaravelNotification\Traits\HasNotifications;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 use AndyDefer\LaravelNotification\ValueObjects\PusherChannelNameVO;
@@ -22,7 +21,6 @@ use Illuminate\Database\Eloquent\Model;
 
 final class TestUser extends Model implements MustNemesis, NotifiableInterface
 {
-    use HasFcmDevices;
     use HasNotifications;
 
     protected $table = 'test_users';
