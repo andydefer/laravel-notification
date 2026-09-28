@@ -139,7 +139,9 @@ final class WebPushDriver extends AbstractDriver
     {
         $payload = [
             'title' => $metadata?->get(self::TITLE_KEY) ?? (string) $message->getSubjectValue(),
+            'subject' => (string) $message->getSubjectValue(),
             'body' => (string) $message->getBodyValue(),
+            'type' => $message->getType(),
         ];
 
         $routeData = $metadata?->get(self::DATA_KEY);
