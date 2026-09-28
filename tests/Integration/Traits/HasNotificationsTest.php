@@ -6,12 +6,15 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Tests\Integration\Traits;
 
+use AndyDefer\DomainStructures\Collections\Utility\StringTypedCollection;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
+use AndyDefer\LaravelNotification\Models\FcmDevice;
 use AndyDefer\LaravelNotification\Models\Notification;
+use AndyDefer\LaravelNotification\Models\WebPushSubscription;
 use AndyDefer\LaravelNotification\Tests\Fixtures\Models\TestUser;
 use AndyDefer\LaravelNotification\Tests\TestCase;
 use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
@@ -71,6 +74,37 @@ final class HasNotificationsTest extends TestCase
             ->create();
     }
 
+    private function createFcmDevice(
+        string $token = 'fcm-token-abc',
+        ?string $deviceId = null,
+        ?TestUser $owner = null,
+    ): FcmDevice {
+        $owner = $owner ?? $this->user;
+
+        return FcmDevice::create([
+            'device_id' => $deviceId ?? UuidVO::generate()->getValue(),
+            'token' => $token,
+            'platform' => 'web',
+            'notifiable_type' => $owner->getMorphClass(),
+            'notifiable_id' => (string) $owner->getKey(),
+        ]);
+    }
+
+    private function createWebPushSubscription(
+        string $endpoint = 'https://example.com/wpush/v2/abc',
+        ?TestUser $owner = null,
+    ): WebPushSubscription {
+        $owner = $owner ?? $this->user;
+
+        return WebPushSubscription::create([
+            'endpoint' => $endpoint,
+            'p256dh' => 'p256dh-key-'.bin2hex(random_bytes(8)),
+            'auth' => 'auth-key-'.bin2hex(random_bytes(8)),
+            'notifiable_type' => $owner->getMorphClass(),
+            'notifiable_id' => (string) $owner->getKey(),
+        ]);
+    }
+
     // ============================================================================
     // Tests - notifications()
     // ============================================================================
@@ -89,6 +123,158 @@ final class HasNotificationsTest extends TestCase
         $this->createNotification();
 
         $this->assertCount(3, $this->user->notifications);
+    }
+
+    // ============================================================================
+    // Tests - fcmDevices()
+    // ============================================================================
+
+    public function test_fcm_devices_returns_morph_many_relation(): void
+    {
+        $relation = $this->user->fcmDevices();
+
+        $this->assertInstanceOf(MorphMany::class, $relation);
+    }
+
+    public function test_fcm_devices_returns_all_user_devices(): void
+    {
+        $this->createFcmDevice('token-1');
+        $this->createFcmDevice('token-2');
+        $this->createFcmDevice('token-3');
+
+        $this->assertCount(3, $this->user->fcmDevices);
+    }
+
+    public function test_fcm_devices_are_scoped_to_user(): void
+    {
+        $otherUser = TestUser::create([
+            'name' => 'Jane Doe',
+            'email' => 'jane@example.com',
+        ]);
+
+        $this->createFcmDevice('token-1');
+        $this->createFcmDevice('token-2');
+        $this->createFcmDevice('token-other', owner: $otherUser);
+
+        $this->assertEquals(2, $this->user->fcmDevices()->count());
+        $this->assertEquals(1, $otherUser->fcmDevices()->count());
+    }
+
+    // ============================================================================
+    // Tests - fcm_tokens
+    // ============================================================================
+
+    public function test_fcm_tokens_returns_empty_collection_when_none(): void
+    {
+        $tokens = $this->user->fcm_tokens;
+
+        $this->assertInstanceOf(StringTypedCollection::class, $tokens);
+        $this->assertCount(0, $tokens);
+    }
+
+    public function test_fcm_tokens_returns_all_tokens(): void
+    {
+        $this->createFcmDevice('token-1');
+        $this->createFcmDevice('token-2');
+
+        $tokens = $this->user->fcm_tokens;
+
+        $this->assertInstanceOf(StringTypedCollection::class, $tokens);
+        $this->assertCount(2, $tokens);
+        $this->assertTrue($tokens->contains('token-1'));
+        $this->assertTrue($tokens->contains('token-2'));
+    }
+
+    // ============================================================================
+    // Tests - has_fcm_devices
+    // ============================================================================
+
+    public function test_has_fcm_devices_returns_true_when_devices_exist(): void
+    {
+        $this->createFcmDevice('token-1');
+
+        $this->assertTrue($this->user->has_fcm_devices);
+    }
+
+    public function test_has_fcm_devices_returns_false_when_no_devices(): void
+    {
+        $this->assertFalse($this->user->has_fcm_devices);
+    }
+
+    // ============================================================================
+    // Tests - webPushSubscriptions()
+    // ============================================================================
+
+    public function test_web_push_subscriptions_returns_morph_many_relation(): void
+    {
+        $relation = $this->user->webPushSubscriptions();
+
+        $this->assertInstanceOf(MorphMany::class, $relation);
+    }
+
+    public function test_web_push_subscriptions_returns_all_user_subscriptions(): void
+    {
+        $this->createWebPushSubscription('https://example.com/wpush/v2/a');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/b');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/c');
+
+        $this->assertCount(3, $this->user->webPushSubscriptions);
+    }
+
+    public function test_web_push_subscriptions_are_scoped_to_user(): void
+    {
+        $otherUser = TestUser::create([
+            'name' => 'Jane Doe',
+            'email' => 'jane@example.com',
+        ]);
+
+        $this->createWebPushSubscription('https://example.com/wpush/v2/a');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/b');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/other', owner: $otherUser);
+
+        $this->assertEquals(2, $this->user->webPushSubscriptions()->count());
+        $this->assertEquals(1, $otherUser->webPushSubscriptions()->count());
+    }
+
+    // ============================================================================
+    // Tests - web_push_endpoints
+    // ============================================================================
+
+    public function test_web_push_endpoints_returns_empty_collection_when_none(): void
+    {
+        $endpoints = $this->user->web_push_endpoints;
+
+        $this->assertInstanceOf(StringTypedCollection::class, $endpoints);
+        $this->assertCount(0, $endpoints);
+    }
+
+    public function test_web_push_endpoints_returns_all_endpoints(): void
+    {
+        $this->createWebPushSubscription('https://example.com/wpush/v2/a');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/b');
+
+        $endpoints = $this->user->web_push_endpoints;
+
+        $this->assertInstanceOf(StringTypedCollection::class, $endpoints);
+        $this->assertCount(2, $endpoints);
+        $this->assertTrue($endpoints->contains('https://example.com/wpush/v2/a'));
+        $this->assertTrue($endpoints->contains('https://example.com/wpush/v2/b'));
+    }
+
+    // ============================================================================
+    // Tests - has_web_push_subscriptions
+    // ============================================================================
+
+    public function test_has_web_push_subscriptions_returns_true_when_subscriptions_exist(): void
+    {
+        $this->createWebPushSubscription();
+
+        $this->assertTrue($this->user->has_web_push_subscriptions);
+    }
+
+    public function test_has_web_push_subscriptions_returns_false_when_no_subscriptions(): void
+    {
+        $this->assertFalse($this->user->has_web_push_subscriptions);
     }
 
     // ============================================================================
@@ -408,7 +594,6 @@ final class HasNotificationsTest extends TestCase
         $this->createNotification();
         $this->createNotification();
 
-        // Créer une notification pour l'autre utilisateur
         $message = $this->createMessage();
         Notification::factory()
             ->channel(MailChannel::class)
@@ -433,44 +618,49 @@ final class HasNotificationsTest extends TestCase
 
     public function test_complete_notification_workflow(): void
     {
-        // 1. Vérifier qu'il n'y a pas de notifications
         $this->assertFalse($this->user->has_notifications);
         $this->assertEquals(0, $this->user->unread_notifications_count);
 
-        // 2. Créer des notifications
         $n1 = $this->createNotification(status: NotificationStatus::PENDING, read: false);
         $n2 = $this->createNotification(status: NotificationStatus::SENT, read: false);
         $n3 = $this->createNotification(status: NotificationStatus::SENT, read: true);
 
-        // 3. Vérifier l'état
         $this->assertTrue($this->user->has_notifications);
         $this->assertEquals(2, $this->user->unread_notifications_count);
         $this->assertTrue($this->user->has_unread_notifications);
 
-        // 4. Marquer une notification comme lue
         $this->user->markNotificationAsRead($n1->getId());
         $this->assertEquals(1, $this->user->unread_notifications_count);
 
-        // 5. Récupérer les notifications non lues
         $this->assertCount(1, $this->user->unread_notifications);
-
-        // 6. Récupérer les notifications lues
         $this->assertCount(2, $this->user->read_notifications);
 
-        // 7. Compter par statut
         $this->assertEquals(1, $this->user->countNotificationsByStatus(NotificationStatus::PENDING));
         $this->assertEquals(2, $this->user->countNotificationsByStatus(NotificationStatus::SENT));
 
-        // 8. Marquer tout comme lu
         $count = $this->user->markAllNotificationsAsRead();
         $this->assertEquals(1, $count);
         $this->assertEquals(0, $this->user->unread_notifications_count);
 
-        // 9. Supprimer les notifications lues
         $deleted = $this->user->deleteReadNotifications();
         $this->assertEquals(3, $deleted);
         $this->assertEquals(0, $this->user->notifications()->count());
         $this->assertFalse($this->user->has_notifications);
+    }
+
+    public function test_complete_fcm_and_webpush_workflow(): void
+    {
+        $this->assertFalse($this->user->has_fcm_devices);
+        $this->assertFalse($this->user->has_web_push_subscriptions);
+
+        $this->createFcmDevice('token-1');
+        $this->createFcmDevice('token-2');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/a');
+
+        $this->assertTrue($this->user->has_fcm_devices);
+        $this->assertTrue($this->user->has_web_push_subscriptions);
+        $this->assertCount(2, $this->user->fcm_tokens);
+        $this->assertCount(1, $this->user->web_push_endpoints);
     }
 
     // ============================================================================
@@ -486,14 +676,12 @@ final class HasNotificationsTest extends TestCase
 
     public function test_notifications_by_channel_returns_only_matching_channel(): void
     {
-        // Arrange : Create notifications with different channels
-        $this->createNotification(); // MailChannel (default dans createNotification)
-        $this->createNotification(); // MailChannel
-        $this->createNotification(); // MailChannel
+        $this->createNotification();
+        $this->createNotification();
+        $this->createNotification();
 
-        // Create a notification with a different channel
         $message = $this->createMessage();
-        $notification = Notification::factory()
+        Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
             ->state([
@@ -504,11 +692,9 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Act : Get notifications by channel
         $mailNotifications = $this->user->notificationsByChannel(MailChannel::class);
         $databaseNotifications = $this->user->notificationsByChannel(DatabaseChannel::class);
 
-        // Assert : Verify only matching channel notifications are returned
         $this->assertCount(3, $mailNotifications);
         $this->assertCount(1, $databaseNotifications);
 
@@ -523,35 +709,28 @@ final class HasNotificationsTest extends TestCase
 
     public function test_notifications_by_channel_respects_limit(): void
     {
-        // Arrange : Create 15 mail notifications
         for ($i = 0; $i < 15; $i++) {
             $this->createNotification();
         }
 
-        // Act : Get notifications with limit
         $result = $this->user->notificationsByChannel(MailChannel::class, 5);
 
-        // Assert : Verify limit is respected
         $this->assertCount(5, $result);
     }
 
     public function test_notifications_by_channel_default_limit_is_ten(): void
     {
-        // Arrange : Create 15 mail notifications
         for ($i = 0; $i < 15; $i++) {
             $this->createNotification();
         }
 
-        // Act : Get notifications without specifying limit
         $result = $this->user->notificationsByChannel(MailChannel::class);
 
-        // Assert : Verify default limit of 10 is applied
         $this->assertCount(10, $result);
     }
 
     public function test_notifications_by_channel_are_scoped_to_user(): void
     {
-        // Arrange : Create another user with notifications
         $otherUser = TestUser::create([
             'name' => 'Jane Doe',
             'email' => 'jane@example.com',
@@ -560,7 +739,6 @@ final class HasNotificationsTest extends TestCase
         $this->createNotification();
         $this->createNotification();
 
-        // Create a notification for the other user with same channel
         $message = $this->createMessage();
         Notification::factory()
             ->channel(MailChannel::class)
@@ -573,18 +751,15 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Act : Get notifications by channel for each user
         $userNotifications = $this->user->notificationsByChannel(MailChannel::class);
         $otherUserNotifications = $otherUser->notificationsByChannel(MailChannel::class);
 
-        // Assert : Verify isolation between users
         $this->assertCount(2, $userNotifications);
         $this->assertCount(1, $otherUserNotifications);
     }
 
     public function test_notifications_by_channel_returns_ordered_by_created_at_desc(): void
     {
-        // Arrange : Create notifications with distinct timestamps
         $old = $this->createNotification();
         $old->created_at = now()->subDays(2);
         $old->save();
@@ -597,10 +772,8 @@ final class HasNotificationsTest extends TestCase
         $middle->created_at = now()->subDay();
         $middle->save();
 
-        // Act : Get notifications by channel
         $result = $this->user->notificationsByChannel(MailChannel::class);
 
-        // Assert : Verify ordering by created_at DESC
         $items = $result->values();
         $this->assertEquals($recent->getId(), $items[0]->getId());
         $this->assertEquals($middle->getId(), $items[1]->getId());
@@ -609,28 +782,22 @@ final class HasNotificationsTest extends TestCase
 
     public function test_notifications_by_channel_with_limit_higher_than_count(): void
     {
-        // Arrange : Create 3 notifications
         $this->createNotification();
         $this->createNotification();
         $this->createNotification();
 
-        // Act : Get with a limit higher than the count
         $result = $this->user->notificationsByChannel(MailChannel::class, 100);
 
-        // Assert : Verify all notifications are returned
         $this->assertCount(3, $result);
     }
 
     public function test_notifications_by_channel_with_different_channel_returns_empty(): void
     {
-        // Arrange : Create only MailChannel notifications
         $this->createNotification();
         $this->createNotification();
 
-        // Act : Try to get notifications from a different channel
         $result = $this->user->notificationsByChannel(SmsChannel::class);
 
-        // Assert : Verify empty collection is returned
         $this->assertCount(0, $result);
     }
 
@@ -647,21 +814,10 @@ final class HasNotificationsTest extends TestCase
 
     public function test_database_notifications_returns_only_database_channel(): void
     {
-        // Arrange : Create mail notifications and database notifications
-        $this->createNotification(); // MailChannel
-        $this->createNotification(); // MailChannel
+        $this->createNotification();
+        $this->createNotification();
 
         $message = $this->createMessage();
-        Notification::factory()
-            ->channel(DatabaseChannel::class)
-            ->to('database')
-            ->state([
-                'session_id' => UuidVO::generate()->getValue(),
-                'notifiable_type' => $this->user->getMorphClass(),
-                'notifiable_id' => $this->user->getKey(),
-                'message' => $message->toArray(),
-            ])
-            ->create();
 
         Notification::factory()
             ->channel(DatabaseChannel::class)
@@ -674,10 +830,19 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Act
+        Notification::factory()
+            ->channel(DatabaseChannel::class)
+            ->to('database')
+            ->state([
+                'session_id' => UuidVO::generate()->getValue(),
+                'notifiable_type' => $this->user->getMorphClass(),
+                'notifiable_id' => $this->user->getKey(),
+                'message' => $message->toArray(),
+            ])
+            ->create();
+
         $result = $this->user->database_notifications;
 
-        // Assert
         $this->assertCount(2, $result);
         foreach ($result as $notification) {
             $this->assertEquals(DatabaseChannel::class, $notification->channel);
@@ -693,7 +858,6 @@ final class HasNotificationsTest extends TestCase
 
         $message = $this->createMessage();
 
-        // Notification for user
         Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
@@ -705,7 +869,6 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Notification for other user
         Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
@@ -736,7 +899,6 @@ final class HasNotificationsTest extends TestCase
     {
         $message = $this->createMessage();
 
-        // Create 15 database notifications
         for ($i = 0; $i < 15; $i++) {
             Notification::factory()
                 ->channel(DatabaseChannel::class)
@@ -757,11 +919,9 @@ final class HasNotificationsTest extends TestCase
 
     public function test_latest_database_notifications_returns_only_database_channel(): void
     {
-        // Arrange : Create mail notifications
         $this->createNotification();
         $this->createNotification();
 
-        // Arrange : Create database notifications
         $message = $this->createMessage();
         Notification::factory()
             ->channel(DatabaseChannel::class)
@@ -826,7 +986,6 @@ final class HasNotificationsTest extends TestCase
 
         $message = $this->createMessage();
 
-        // Notification for user
         Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
@@ -838,7 +997,6 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Notification for other user
         Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
@@ -865,7 +1023,6 @@ final class HasNotificationsTest extends TestCase
 
     public function test_unread_database_notifications_count_returns_only_unread_database(): void
     {
-        // Arrange : Create 2 unread database notifications
         for ($i = 0; $i < 2; $i++) {
             Notification::factory()
                 ->channel(DatabaseChannel::class)
@@ -880,7 +1037,6 @@ final class HasNotificationsTest extends TestCase
                 ->create();
         }
 
-        // Arrange : Create 1 read database notification
         Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
@@ -893,7 +1049,6 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Arrange : Create 1 unread mail notification (should NOT be counted)
         $this->createNotification();
 
         $this->assertEquals(2, $this->user->unread_database_notifications_count);
@@ -912,7 +1067,6 @@ final class HasNotificationsTest extends TestCase
 
     public function test_unread_database_notifications_returns_only_unread_database(): void
     {
-        // Arrange : 2 unread database notifications
         for ($i = 0; $i < 2; $i++) {
             Notification::factory()
                 ->channel(DatabaseChannel::class)
@@ -927,7 +1081,6 @@ final class HasNotificationsTest extends TestCase
                 ->create();
         }
 
-        // Arrange : 1 read database notification
         Notification::factory()
             ->channel(DatabaseChannel::class)
             ->to('database')
@@ -940,7 +1093,6 @@ final class HasNotificationsTest extends TestCase
             ])
             ->create();
 
-        // Arrange : 1 unread mail notification
         $this->createNotification();
 
         $result = $this->user->unread_database_notifications;
@@ -1029,7 +1181,6 @@ final class HasNotificationsTest extends TestCase
 
     public function test_has_unread_database_notifications_returns_false_when_no_database_notifications(): void
     {
-        // Mail notification only
         $this->createNotification();
 
         $this->assertFalse($this->user->has_unread_database_notifications);
