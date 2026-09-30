@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Drivers;
 
+use AndyDefer\Directive\Helpers\Paths;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Abstracts\AbstractDriver;
 use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
@@ -36,7 +37,7 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
     {
         return $this->config->enabled
             && ! empty($this->config->credentials_path)
-            && is_file((string) $this->config->credentials_path);
+            && is_file($this->getFirebaseCredentialsFilePath());
     }
 
     protected function execute(
@@ -162,7 +163,8 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
 
         try {
             $client = new GoogleClient;
-            $client->setAuthConfig((string) $this->config->credentials_path);
+
+            $client->setAuthConfig($this->getFirebaseCredentialsFilePath());
             $client->addScope($this->config->scope);
 
             $token = $client->fetchAccessTokenWithAssertion();
@@ -207,5 +209,16 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
         }
 
         return $decoded;
+    }
+
+    public function getFirebaseCredentialsFilePath(): string
+    {
+        $credentialsPath = ltrim((string) $this->config->credentials_path, '/');
+
+        if ($credentialsPath === '') {
+            throw new RuntimeException('Firebase credentials path is not configured.');
+        }
+
+        return Paths::projectRoot().'/'.$credentialsPath;
     }
 }
