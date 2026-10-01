@@ -93,5 +93,6 @@ phpstan.md
 psalm.md
 rector.md
 tests/test_env.php
+.env.testing
 web
 tests/Fixtures/firebase_credentials.json
