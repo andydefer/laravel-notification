@@ -8,7 +8,11 @@ namespace AndyDefer\LaravelNotification\Traits;
 
 use AndyDefer\DomainStructures\Collections\Utility\StringTypedCollection;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
+use AndyDefer\LaravelNotification\Collections\FcmDeviceDataCollection;
+use AndyDefer\LaravelNotification\Collections\WebPushSubscriptionDataCollection;
 use AndyDefer\LaravelNotification\Contracts\Repositories\NotificationRepositoryInterface;
+use AndyDefer\LaravelNotification\Datas\FcmDeviceData;
+use AndyDefer\LaravelNotification\Datas\WebPushSubscriptionData;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\Models\FcmDevice;
 use AndyDefer\LaravelNotification\Models\Notification;
@@ -46,9 +50,11 @@ use Illuminate\Support\Collection;
  * @property-read bool $has_unread_notifications
  * @property-read bool $has_notifications
  * @property-read Collection<int, FcmDevice> $fcm_devices
+ * @property-read FcmDeviceDataCollection $fcm_devices_data
  * @property-read StringTypedCollection $fcm_tokens
  * @property-read bool $has_fcm_devices
  * @property-read Collection<int, WebPushSubscription> $web_push_subscriptions
+ * @property-read WebPushSubscriptionDataCollection $web_push_subscription_data
  * @property-read StringTypedCollection $web_push_endpoints
  * @property-read bool $has_web_push_subscriptions
  */
@@ -112,6 +118,26 @@ trait HasNotifications
     }
 
     /**
+     * Get all FCM devices owned by this model as Data objects.
+     *
+     * @return Attribute<FcmDeviceDataCollection, never>
+     */
+    protected function fcmDevicesData(): Attribute
+    {
+        return Attribute::get(function (): FcmDeviceDataCollection {
+            $collection = new FcmDeviceDataCollection;
+
+            foreach ($this->fcmDevices()->get() as $device) {
+                $collection->add(FcmDeviceData::from(
+                    action_normalizer_chain(true)->normalize($device),
+                ));
+            }
+
+            return $collection;
+        });
+    }
+
+    /**
      * Get all Web Push endpoints owned by this model.
      *
      * @return Attribute<StringTypedCollection, never>
@@ -135,6 +161,26 @@ trait HasNotifications
         return Attribute::get(
             fn (): bool => $this->webPushSubscriptions()->exists(),
         );
+    }
+
+    /**
+     * Get all Web Push subscriptions owned by this model as Data objects.
+     *
+     * @return Attribute<WebPushSubscriptionDataCollection, never>
+     */
+    protected function webPushSubscriptionData(): Attribute
+    {
+        return Attribute::get(function (): WebPushSubscriptionDataCollection {
+            $collection = new WebPushSubscriptionDataCollection;
+
+            foreach ($this->webPushSubscriptions()->get() as $subscription) {
+                $collection->add(WebPushSubscriptionData::from(
+                    action_normalizer_chain(true)->normalize($subscription),
+                ));
+            }
+
+            return $collection;
+        });
     }
 
     /**

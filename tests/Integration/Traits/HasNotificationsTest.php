@@ -11,6 +11,10 @@ use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\DatabaseChannel;
 use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Channels\SmsChannel;
+use AndyDefer\LaravelNotification\Collections\FcmDeviceDataCollection;
+use AndyDefer\LaravelNotification\Collections\WebPushSubscriptionDataCollection;
+use AndyDefer\LaravelNotification\Datas\FcmDeviceData;
+use AndyDefer\LaravelNotification\Datas\WebPushSubscriptionData;
 use AndyDefer\LaravelNotification\Enums\NotificationStatus;
 use AndyDefer\LaravelNotification\Models\FcmDevice;
 use AndyDefer\LaravelNotification\Models\Notification;
@@ -202,6 +206,61 @@ final class HasNotificationsTest extends TestCase
     }
 
     // ============================================================================
+    // Tests - fcm_devices_data
+    // ============================================================================
+
+    public function test_fcm_devices_data_returns_empty_collection_when_none(): void
+    {
+        $result = $this->user->fcm_devices_data;
+
+        $this->assertInstanceOf(FcmDeviceDataCollection::class, $result);
+        $this->assertCount(0, $result);
+    }
+
+    public function test_fcm_devices_data_returns_all_devices_as_data(): void
+    {
+        $this->createFcmDevice('token-1');
+        $this->createFcmDevice('token-2');
+
+        $result = $this->user->fcm_devices_data;
+
+        $this->assertInstanceOf(FcmDeviceDataCollection::class, $result);
+        $this->assertCount(2, $result);
+
+        foreach ($result as $data) {
+            $this->assertInstanceOf(FcmDeviceData::class, $data);
+        }
+    }
+
+    public function test_fcm_devices_data_exposes_device_payload(): void
+    {
+        $device = $this->createFcmDevice('token-42');
+
+        $result = $this->user->fcm_devices_data;
+
+        $this->assertCount(1, $result);
+        $first = $result->first();
+
+        $this->assertSame((string) $device->getKey(), $first->id);
+        $this->assertSame('token-42', $first->token);
+    }
+
+    public function test_fcm_devices_data_is_scoped_to_user(): void
+    {
+        $otherUser = TestUser::create([
+            'name' => 'Jane Doe',
+            'email' => 'jane@example.com',
+        ]);
+
+        $this->createFcmDevice('token-1');
+        $this->createFcmDevice('token-2');
+        $this->createFcmDevice('token-other', owner: $otherUser);
+
+        $this->assertCount(2, $this->user->fcm_devices_data);
+        $this->assertCount(1, $otherUser->fcm_devices_data);
+    }
+
+    // ============================================================================
     // Tests - webPushSubscriptions()
     // ============================================================================
 
@@ -275,6 +334,61 @@ final class HasNotificationsTest extends TestCase
     public function test_has_web_push_subscriptions_returns_false_when_no_subscriptions(): void
     {
         $this->assertFalse($this->user->has_web_push_subscriptions);
+    }
+
+    // ============================================================================
+    // Tests - web_push_subscription_data
+    // ============================================================================
+
+    public function test_web_push_subscription_data_returns_empty_collection_when_none(): void
+    {
+        $result = $this->user->web_push_subscription_data;
+
+        $this->assertInstanceOf(WebPushSubscriptionDataCollection::class, $result);
+        $this->assertCount(0, $result);
+    }
+
+    public function test_web_push_subscription_data_returns_all_subscriptions_as_data(): void
+    {
+        $this->createWebPushSubscription('https://example.com/wpush/v2/a');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/b');
+
+        $result = $this->user->web_push_subscription_data;
+
+        $this->assertInstanceOf(WebPushSubscriptionDataCollection::class, $result);
+        $this->assertCount(2, $result);
+
+        foreach ($result as $data) {
+            $this->assertInstanceOf(WebPushSubscriptionData::class, $data);
+        }
+    }
+
+    public function test_web_push_subscription_data_exposes_subscription_payload(): void
+    {
+        $subscription = $this->createWebPushSubscription('https://example.com/wpush/v2/42');
+
+        $result = $this->user->web_push_subscription_data;
+
+        $this->assertCount(1, $result);
+        $first = $result->first();
+
+        $this->assertSame((string) $subscription->getKey(), $first->id);
+        $this->assertSame('https://example.com/wpush/v2/42', $first->endpoint);
+    }
+
+    public function test_web_push_subscription_data_is_scoped_to_user(): void
+    {
+        $otherUser = TestUser::create([
+            'name' => 'Jane Doe',
+            'email' => 'jane@example.com',
+        ]);
+
+        $this->createWebPushSubscription('https://example.com/wpush/v2/a');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/b');
+        $this->createWebPushSubscription('https://example.com/wpush/v2/other', owner: $otherUser);
+
+        $this->assertCount(2, $this->user->web_push_subscription_data);
+        $this->assertCount(1, $otherUser->web_push_subscription_data);
     }
 
     // ============================================================================
@@ -661,6 +775,8 @@ final class HasNotificationsTest extends TestCase
         $this->assertTrue($this->user->has_web_push_subscriptions);
         $this->assertCount(2, $this->user->fcm_tokens);
         $this->assertCount(1, $this->user->web_push_endpoints);
+        $this->assertCount(2, $this->user->fcm_devices_data);
+        $this->assertCount(1, $this->user->web_push_subscription_data);
     }
 
     // ============================================================================
