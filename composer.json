@@ -21,10 +21,10 @@
     ],
     "require": {
         "php": "^8.2",
-        "andydefer/laravel-task": "^4.15.9",
+        "andydefer/laravel-task": "^4.15.10",
         "pusher/pusher-php-server": "^7.3",
         "google/apiclient": "^2.20",
-        "andydefer/laravel-nemesis": "^1.22.0",
+        "andydefer/laravel-nemesis": "^1.22.1",
         "minishlink/web-push": "^11.0"
     },
     "require-dev": {
