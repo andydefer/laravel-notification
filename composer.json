@@ -24,7 +24,7 @@
         "andydefer/laravel-task": "^4.15.33",
         "pusher/pusher-php-server": "^7.3",
         "google/apiclient": "^2.20",
-        "andydefer/laravel-nemesis": "^1.22.23",
+        "andydefer/laravel-nemesis": "^1.23.0",
         "minishlink/web-push": "^11.0"
     },
     "require-dev": {
