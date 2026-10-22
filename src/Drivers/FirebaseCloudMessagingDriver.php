@@ -14,7 +14,6 @@ use Google\Client as GoogleClient;
 use Google\Exception as GoogleException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
-use stdClass;
 
 final class FirebaseCloudMessagingDriver extends AbstractDriver
 {
@@ -55,18 +54,23 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
             throw new RuntimeException('Firebase device token is missing.');
         }
 
-        $data = $this->resolveData($message, $route);
+        $payload = $this->resolveData($message, $route);
 
-        $payload = [
+        $data = [
+            'type' => $message->getType(),
+            'payload' => $payload === []
+                ? '{}'
+                : json_encode($payload, JSON_THROW_ON_ERROR),
+        ];
+
+        $fcmPayload = [
             'message' => [
                 'token' => $deviceToken,
                 'notification' => [
                     'title' => $this->resolveTitle($message, $route),
                     'body' => $message->getBodyValue(),
                 ],
-                // FCM requires `data` to be a JSON object (map), never a list.
-                // An empty PHP array encodes to `[]`, which FCM rejects.
-                'data' => $data === [] ? new stdClass : $data,
+                'data' => $data,
             ],
         ];
 
@@ -76,7 +80,7 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
             ->timeout($this->config->timeout)
             ->post(
                 "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send",
-                $payload,
+                $fcmPayload,
             );
 
         if (! $response->successful()) {
