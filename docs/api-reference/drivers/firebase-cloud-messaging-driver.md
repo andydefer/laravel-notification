@@ -2,7 +2,7 @@
 
 ## Description
 
-Driver d'envoi de notifications push via Firebase Cloud Messaging (HTTP v1). Gère l'authentification OAuth 2 Google, la construction du payload et l'appel HTTP à l'API FCM.
+Driver d'envoi de notifications push via **Firebase Cloud Messaging HTTP v1**. Il transforme un `NotificationMessageVO` en payload FCM conforme et l'envoie à l'API Google avec authentification OAuth 2.0.
 
 ## Hiérarchie / Implémentations
 
@@ -13,257 +13,317 @@ AbstractDriver
 
 ## Rôle principal
 
-Ce driver est instancié par `FirebaseCloudMessagingChannel::createDriver()`. Il :
+Ce driver est le **maillon d'exécution** du canal `FirebaseCloudMessagingChannel`. Il :
 
-- Vérifie que la configuration Firebase est complète.
-- Génère (et met en cache) un access token OAuth 2 via un Service Account Google.
-- Résout le `project_id` (depuis la config ou depuis le fichier credentials).
-- Construit le payload FCM v1 (`token`, `notification`, `data`).
-- Envoie la requête HTTP et interprète la réponse.
-- Remonte les erreurs sous forme de `RuntimeException`.
+1. Résout le `project_id` Firebase (config ou credentials)
+2. Obtient un access token OAuth 2.0 via un service account Google
+3. Construit le payload FCM HTTP v1 (**3 blocs** : `notification`, `android.notification`, `data`)
+4. Envoie la requête HTTP POST vers `https://fcm.googleapis.com/v1/projects/{projectId}/messages:send`
+5. Lève une `RuntimeException` si l'envoi échoue
+
+Il **ne contient aucune logique métier** — il lit le message (`NotificationMessageVO`) et le transforme. La route (`NotificationRouteVO`) ne porte que le **token** du device.
 
 ## Installation
 
-Le driver nécessite le SDK Google :
-
 ```bash
-composer require google/apiclient
+composer require google/auth guzzlehttp/guzzle
 ```
 
-Configuration attendue dans `config/notification.php` :
+Variables `.env` requises :
 
-```php
-'firebase' => [
-    'enabled' => true,
-    'credentials_path' => env('FIREBASE_CREDENTIALS_PATH'),
-    'project_id' => env('FIREBASE_PROJECT_ID'),
-    'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
-    'timeout' => 30,
-],
+```env
+FIREBASE_NOTIFICATION_ENABLED=true
+FIREBASE_CREDENTIALS_PATH=/path/to/service-account.json
+FIREBASE_PROJECT_ID=my-project-id
 ```
 
 ## API / Méthodes publiques
 
-### `__construct(FirebaseConfigRecord $config)`
-
-| Paramètre | Type | Description |
-|-----------|------|-------------|
-| `$config` | `FirebaseConfigRecord` | Configuration Firebase |
-
-**Retourne :** `void`
-
----
-
 ### `getChannel(): string`
 
-Retourne le nom court du canal.
+Retourne le nom canonique du canal.
 
-**Retourne :** `string` - Toujours `'firebase'`.
+**Retourne :** `string` — Toujours `'firebase'`.
+
+**Exemple :**
+```php
+$driver->getChannel(); // 'firebase'
+```
 
 ---
 
 ### `validateConfiguration(): bool`
 
-Vérifie que le driver est prêt à envoyer.
+Vérifie que la configuration Firebase est complète et que le fichier de credentials existe.
 
-**Retourne :** `bool` - `true` si :
-- `enabled === true`
-- `credentials_path` non vide
-- Le fichier existe sur le disque
+**Retourne :** `bool` — `true` si `enabled=true`, `credentials_path` non vide et fichier existant.
 
 **Exemple :**
-
 ```php
-if ($driver->validateConfiguration()) {
-    // Prêt à envoyer.
+if (! $driver->validateConfiguration()) {
+    throw new RuntimeException('Firebase non configuré');
 }
 ```
 
 ---
 
-### `send(NotificationMessageVO $message, NotificationRouteVO $route): SendResultRecord`
+### `getFirebaseCredentialsFilePath(): string`
 
-Héritée de `AbstractDriver`. Exécute `execute()` après validation.
+Résout le chemin absolu du fichier de credentials depuis `Paths::projectRoot()`.
+
+**Retourne :** `string` — Chemin absolu.
+
+**Exceptions :** `RuntimeException` si `credentials_path` est vide.
+
+**Exemple :**
+```php
+$path = $driver->getFirebaseCredentialsFilePath();
+// '/var/www/app/firebase-credentials.json'
+```
+
+---
+
+### `execute(NotificationMessageVO $message, NotificationRouteVO $route): bool`
+
+**Méthode protégée** héritée d'`AbstractDriver`, exposée via `send()`. Effectue l'envoi réel.
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
-| `$message` | `NotificationMessageVO` | Message à envoyer |
-| `$route` | `NotificationRouteVO` | Destination + metadata |
+| `$message` | `NotificationMessageVO` | Message portant titre, corps, type, data, metadata |
+| `$route` | `NotificationRouteVO` | Route portant le token du device |
 
-**Retourne :** `SendResultRecord` - Résultat de l'envoi (success, channel, destination, error_message)
+**Retourne :** `bool` — `true` si Firebase répond avec un statut HTTP 2xx.
 
-**Exceptions :** Le driver encapsule `execute()` et retourne un résultat d'échec plutôt que de propager. `execute()` peut lever :
+**Exceptions :**
+- `RuntimeException` — Configuration invalide
+- `RuntimeException` — Token device manquant ou non-string
+- `RuntimeException` — `project_id` introuvable
+- `RuntimeException` — Authentification Google échouée
+- `RuntimeException` — Réponse HTTP non-2xx de Firebase
 
-| Exception | Cause |
-|-----------|-------|
-| `RuntimeException` | Configuration incomplète, token manquant, FCM HTTP non-2xx |
+**Exemple :**
+```php
+$route = new NotificationRouteVO(
+    channelClass: FirebaseCloudMessagingChannel::class,
+    destination: 'eQhyKer9t_jperz7AYDDVB:APA91b...',
+);
 
----
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('Votre profil a été mis à jour.'),
+    subject: new MessageSubjectVO('Profil mis à jour'),
+    type: 'profile_updated',
+    data: new StrictDataObject(['user_id' => '61']),
+    metadata: new StrictDataObject([
+        'icon'       => 'ic_notification',
+        'channel_id' => 'afya_payments',
+    ]),
+);
 
-### `execute(NotificationMessageVO $message, NotificationRouteVO $route): bool` (protected)
+$result = $driver->send($message, $route);
 
-Logique principale. Non appelable directement, mais c'est le cœur du driver.
-
-**Payload FCM v1 envoyé :**
-
-```json
-{
-    "message": {
-        "token": "eQhyKer9t...",
-        "notification": {
-            "title": "Bonjour ! 👋",
-            "body": "Ceci est un message envoyé depuis du PHP pur."
-        },
-        "data": {
-            "screen": "profile",
-            "user_id": "42"
-        }
-    }
+if (! $result->success) {
+    Log::error($result->error_message?->getValue());
 }
 ```
-
-**Règles de construction :**
-
-- **Titre** : priorité à `route.metadata.title`, sinon `message.subject`, sinon `'Notification'`.
-- **Corps** : `message.body`.
-- **Data** : fusion `route.metadata.data` + `message.data`. Toutes les valeurs sont converties en **string** (les tableaux/objets sont encodés en JSON).
-- **Token** : `route.destination`.
-
-**Retourne :** `bool` - `true` si HTTP 2xx.
-
----
 
 ## Cas d'utilisation
 
-### Cas 1 : Envoi d'une notification simple
+### Cas 1 : Notification simple (titre + corps)
+
+Envoi sans métadonnées visuelles — Firebase utilise le canal par défaut.
 
 ```php
-use AndyDefer\DomainStructures\Utils\StrictDataObject;
-use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
-use AndyDefer\LaravelNotification\Records\SendNowRecord;
-use AndyDefer\LaravelNotification\Services\NotificationService;
-use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
-use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
-
 $message = new NotificationMessageVO(
     body: new MessageBodyVO('Bonjour depuis PHP.'),
-    subject: new MessageSubjectVO('Salut !'),
+    subject: new MessageSubjectVO('Test'),
+    type: 'test',
 );
 
-$route = new NotificationRouteVO(
-    channelClass: FirebaseCloudMessagingChannel::class,
-    destination: $deviceToken,
-    metadata: new StrictDataObject([
-        'title' => 'Nouveau message',
-        'data' => ['screen' => 'inbox'],
-    ]),
-);
-
-$record = SendNowRecord::from([
-    'channels' => [FirebaseCloudMessagingChannel::class],
-    'limit_per_channel' => 1,
-]);
-
-app(NotificationService::class)->sendNow($user, $message, $record);
+$driver->send($message, $route);
 ```
 
-### Cas 2 : Envoi avec données riches
-
-Les valeurs non scalaires sont automatiquement encodées en JSON :
-
-```php
-$route = new NotificationRouteVO(
-    channelClass: FirebaseCloudMessagingChannel::class,
-    destination: $deviceToken,
-    metadata: new StrictDataObject([
-        'title' => 'Commande',
-        'data' => [
-            'order_id' => '42',
-            'items' => ['pizza', 'boisson'],
-            'total' => 24.5,
-        ],
-    ]),
-);
-```
-
-Payload `data` résultant :
-
+**Payload produit :**
 ```json
 {
-    "order_id": "42",
-    "items": "[\"pizza\",\"boisson\"]",
-    "total": "24.5"
+  "message": {
+    "token": "...",
+    "notification": { "title": "Test", "body": "Bonjour depuis PHP." },
+    "data": { "type": "test", "payload": "{}" }
+  }
 }
 ```
+
+---
+
+### Cas 2 : Notification avec métadonnées visuelles Android
+
+Icône, image, canal, son, tag, click_action.
+
+```php
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('Votre commande a été expédiée.'),
+    subject: new MessageSubjectVO('Commande expédiée'),
+    type: 'order_shipped',
+    data: new StrictDataObject(['order_id' => 42]),
+    metadata: new StrictDataObject([
+        'icon'         => 'ic_notification',
+        'image'        => 'https://cdn.afya.com/banner.png',
+        'channel_id'   => 'afya_orders',
+        'sound'        => 'default',
+        'tag'          => 'orders',
+        'click_action' => 'OPEN_ORDERS',
+    ]),
+);
+
+$driver->send($message, $route);
+```
+
+**Payload produit :**
+```json
+{
+  "message": {
+    "token": "...",
+    "notification": {
+      "title": "Commande expédiée",
+      "body": "Votre commande a été expédiée."
+    },
+    "android": {
+      "notification": {
+        "icon": "ic_notification",
+        "image": "https://cdn.afya.com/banner.png",
+        "channel_id": "afya_orders",
+        "sound": "default",
+        "tag": "orders",
+        "click_action": "OPEN_ORDERS"
+      }
+    },
+    "data": {
+      "type": "order_shipped",
+      "payload": "{\"order_id\":42}"
+    }
+  }
+}
+```
+
+---
+
+### Cas 3 : Payload métier complexe avec tableaux
+
+Les tableaux PHP sont automatiquement `json_encode()`-és **une seule fois** par le driver.
+
+```php
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('Profil mis à jour.'),
+    subject: new MessageSubjectVO('Profil'),
+    type: 'profile_updated',
+    data: new StrictDataObject([
+        'user_id'        => '61',
+        'updated_fields' => ['currency', 'phone'], // ← array natif
+        'roles'          => ['user', 'admin'],
+    ]),
+);
+
+$driver->send($message, $route);
+```
+
+**Payload produit :**
+```json
+"data": {
+  "type": "profile_updated",
+  "payload": "{\"user_id\":\"61\",\"updated_fields\":[\"currency\",\"phone\"],\"roles\":[\"user\",\"admin\"]}"
+}
+```
+
+⚠️ **Ne jamais** pré-encoder avec `json_encode()` dans `data` → double stringification.
 
 ## Flux d'exécution
 
 ```
-execute($message, $route)
-    → validateConfiguration()
-    → resolveProjectId()
-    → resolveTitle()
-    → resolveData()
-    → accessToken()
-        → Google\Client::setAuthConfig()
-        → Google\Client::fetchAccessTokenWithAssertion()
-    → Http::withToken()->post(fcm.googleapis.com/v1/...)
-        ├── 2xx → return true
-        └── non-2xx → RuntimeException
+execute()
+  │
+  ├─→ validateConfiguration()   [runtime]
+  │     └─ si false → RuntimeException
+  │
+  ├─→ resolveProjectId()
+  │     ├─ config->project_id ?? credentials->project_id
+  │     └─ si vide → RuntimeException
+  │
+  ├─→ route->getDestination()
+  │     └─ si vide/non-string → RuntimeException
+  │
+  ├─→ resolveData($message)
+  │     └─ data->toArray() → json_encode(tableaux)
+  │
+  ├─→ resolveTitle($message)
+  │     └─ subject ?? DEFAULT_TITLE ('Notification')
+  │
+  ├─→ resolveAndroidNotification($message)
+  │     └─ metadata->get('icon'|'image'|'channel_id'|...)
+  │
+  ├─→ array_filter($fcmPayload)  [retire 'android' si vide]
+  │
+  ├─→ accessToken()
+  │     ├─ cache ?? nouveau GoogleClient
+  │     ├─ credentials path + scope
+  │     └─ fetchAccessTokenWithAssertion()
+  │
+  └─→ Http::withToken($token)->post(fcm.googleapis.com/...)
+        ├─ 2xx → return true
+        └─ non-2xx → RuntimeException (HTTP status + body)
 ```
 
 ## Gestion des erreurs
 
 | Situation | Exception | Message |
 |-----------|-----------|---------|
-| Config incomplète | `RuntimeException` | `Firebase configuration is incomplete.` |
-| Token device vide | `RuntimeException` | `Firebase device token is missing.` |
+| Config Firebase incomplète | `RuntimeException` | `Firebase configuration is incomplete.` |
+| Token device manquant | `RuntimeException` | `Firebase device token is missing.` |
 | `project_id` absent | `RuntimeException` | `Firebase project_id is missing from credentials.` |
-| Credentials illisibles | `RuntimeException` | `Unable to read Firebase credentials at "...".` |
-| Credentials non-JSON | `RuntimeException` | `Firebase credentials file is not valid JSON.` |
-| Auth Google échouée | `RuntimeException` | `Firebase authentication failed: {message}` |
-| Pas d'access token | `RuntimeException` | `Firebase authentication returned no access token.` |
-| FCM non-2xx | `RuntimeException` | `Firebase trigger failed (HTTP {status}): {body}` |
-
-**Codes FCM courants :**
-
-| HTTP | `errorCode` | Signification |
-|------|-------------|---------------|
-| 400 | `INVALID_ARGUMENT` | Payload malformé |
-| 401 | `UNAUTHENTICATED` | Access token expiré |
-| 403 | `SENDER_ID_MISMATCH` | Token appartient à un autre projet |
-| 404 | `UNREGISTERED` | Token désenregistré (app désinstallée) |
-| 429 | `QUOTA_EXCEEDED` | Trop de requêtes |
-| 503 | `UNAVAILABLE` | FCM temporairement indisponible |
+| Auth Google échouée | `RuntimeException` | `Firebase authentication failed: {msg}` |
+| Pas d'access_token retourné | `RuntimeException` | `Firebase authentication returned no access token.` |
+| Credentials file introuvable | `RuntimeException` | `Firebase credentials file not found at "{path}".` |
+| Credentials file illisible | `RuntimeException` | `Unable to read Firebase credentials at "{path}".` |
+| Credentials JSON invalide | `RuntimeException` | `Firebase credentials file is not valid JSON.` |
+| `credentials_path` vide | `RuntimeException` | `Firebase credentials path is not configured.` |
+| Réponse HTTP non-2xx | `RuntimeException` | `Firebase trigger failed (HTTP {code}): {body}` |
 
 ## Intégration
 
-Le driver s'intègre avec :
+```
+FirebaseCloudMessagingChannel
+    └── createDriver() → FirebaseCloudMessagingDriver
+            ├── dépend de FirebaseConfigRecord (hydraté depuis .env)
+            ├── consomme NotificationMessageVO (body, subject, type, data, metadata)
+            ├── consomme NotificationRouteVO (destination = token)
+            └── retourne SendResultRecord (success/error/channel/destination)
+```
 
-- `FirebaseCloudMessagingChannel` — instancie le driver.
-- `FirebaseConfigRecord` — transporte la config.
-- `NotificationMessageVO` — corps, sujet, type, data.
-- `NotificationRouteVO` — destination + metadata.
-- `StrictDataObject` — metadata typées.
-- `AbstractDriver::send()` — point d'entrée, produit un `SendResultRecord`.
+Le driver est invoqué par `NotificationSenderProcessor` pour chaque `NotificationRouteVO` dont le canal est `FirebaseCloudMessagingChannel`.
 
 ## Performance
 
-- **Access token** mis en cache dans la propriété `$accessToken` pour la durée de vie du driver (utile pour les envois en masse sur une même instance).
-- **Appel HTTP** via `Illuminate\Support\Facades\Http` — compatible Guzzle, timeouts configurables.
-- **Encodage data** : boucle O(n) sur les clés du payload, coût négligeable.
-- Aucune requête DB dans ce driver.
+| Aspect | Détail |
+|---|---|
+| **Cache access token** | `$this->accessToken` — un seul appel Google par instance |
+| **Latence réseau** | 1 requête HTTP POST par device token (pas de batch natif FCM HTTP v1) |
+| **`json_encode`** | Une seule passe sur les valeurs non scalaires de `data` |
+| **`array_filter`** | O(n) sur 4 clés racines — négligeable |
+| **Credentials load** | 1 seule fois par `resolveProjectId()` si `project_id` absent de config |
+
+Pour envoyer à **N devices**, itérer sur N `NotificationRouteVO` — chaque appel est indépendant. Le package fournit `PingPong` pour nettoyer les tokens invalides (voir guide `laravel-notification` §5.3).
 
 ## Compatibilité
 
-| Version | Support |
-|---------|---------|
-| PHP 8.1+ | ✅ Complet |
-| Laravel 10+ | ✅ Complet |
-| `google/apiclient` ^2.15 | ✅ Requis |
-| FCM HTTP v1 | ✅ Requis (legacy non supportée) |
+| Version PHP | Support |
+|-------------|---------|
+| PHP 8.1+ | ✅ Complet (readonly, enums, match) |
+| PHP 8.0 | ✅ Complet (promotion, named args) |
+| PHP 7.4 | ❌ Non supporté (readonly, promotion) |
+
+| Version Firebase | Support |
+|---|---|
+| HTTP v1 (depuis 2023) | ✅ Seule API supportée par Google |
+| Legacy FCM API | ❌ Décommissionnée par Google (2024) |
 
 ## Exemple complet
 
@@ -274,44 +334,65 @@ declare(strict_types=1);
 
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Channels\FirebaseCloudMessagingChannel;
-use AndyDefer\LaravelNotification\Records\SendNowRecord;
-use AndyDefer\LaravelNotification\Services\NotificationService;
+use AndyDefer\LaravelNotification\Drivers\FirebaseCloudMessagingDriver;
+use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
 use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 
-$message = new NotificationMessageVO(
-    body: new MessageBodyVO('Ceci est un message envoyé depuis du PHP pur.'),
-    subject: new MessageSubjectVO('Bonjour ! 👋'),
-    type: 'test',
-    data: new StrictDataObject([
-        'screen' => 'profile',
-        'user_id' => '42',
-    ]),
+// 1. Configuration (généralement depuis .env via FirebaseConfigRecord::from(...))
+$config = new FirebaseConfigRecord(
+    enabled: true,
+    credentials_path: 'storage/firebase/service-account.json',
+    project_id: 'afya-medical',
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    timeout: 30,
 );
 
+// 2. Driver
+$driver = new FirebaseCloudMessagingDriver($config);
+
+// 3. Route — uniquement le token
 $route = new NotificationRouteVO(
     channelClass: FirebaseCloudMessagingChannel::class,
-    destination: 'eQhyKer9t_jperz7AYDDVB:APA91bFJTg_RGtoAIKIqj2Ps4ToXUWDua12kmAj8GD6W9UtELfheJLQNzhvl6Uc4Q7tdkT6FAS2GX4UdAwt4sv2nBn1nYN2Bl6rS5A_HbokZ3E7IaMlTM-s',
+    destination: 'eQhyKer9t_jperz7AYDDVB:APA91bH...',
+);
+
+// 4. Message — séparation stricte `data` (métier) vs `metadata` (visuel)
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('Votre profil a été mis à jour avec succès.'),
+    subject: new MessageSubjectVO('Profil mis à jour'),
+    type: 'profile_updated',
+    data: new StrictDataObject([
+        'user_id'        => '61',
+        'updated_fields' => ['currency'], // array natif → json_encode unique
+    ]),
     metadata: new StrictDataObject([
-        'title' => 'Test Title',
+        'icon'         => 'ic_notification',
+        'image'        => 'https://cdn.afya.com/banner.png',
+        'channel_id'   => 'afya_payments',
+        'sound'        => 'default',
+        'tag'          => 'profile',
+        'click_action' => 'OPEN_PROFILE',
     ]),
 );
 
-$record = SendNowRecord::from([
-    'channels' => [FirebaseCloudMessagingChannel::class],
-    'limit_per_channel' => 1,
-]);
+// 5. Envoi
+$result = $driver->send($message, $route);
 
-$service = app(NotificationService::class);
-$results = $service->sendNow($user, $message, $record);
+if (! $result->success) {
+    Log::error('Firebase send failed', [
+        'channel'     => $result->channel->getValue(),
+        'destination' => $result->destination,
+        'error'       => $result->error_message?->getValue(),
+    ]);
 
-if ($results->allSuccess()) {
-    echo "✅ Notification envoyée.\n";
-} else {
-    foreach ($results->getFailures() as $failure) {
-        echo "❌ " . $failure->error_message->getValue() . "\n";
-    }
+    return;
 }
+
+Log::info('Notification FCM envoyée', [
+    'destination' => $result->destination,
+    'type'        => $message->getType(),
+]);
 ```

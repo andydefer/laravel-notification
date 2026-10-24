@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AndyDefer\LaravelNotification\Drivers;
 
 use AndyDefer\Directive\Helpers\Paths;
-use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Abstracts\AbstractDriver;
 use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
@@ -17,11 +16,20 @@ use RuntimeException;
 
 final class FirebaseCloudMessagingDriver extends AbstractDriver
 {
-    private const TITLE_KEY = 'title';
-
-    private const DATA_KEY = 'data';
-
     private const DEFAULT_TITLE = 'Notification';
+
+    // ⬇️ Clés visuelles Android (vont dans `android.notification`)
+    private const ICON_KEY = 'icon';
+
+    private const IMAGE_KEY = 'image';
+
+    private const CHANNEL_ID_KEY = 'channel_id';
+
+    private const SOUND_KEY = 'sound';
+
+    private const TAG_KEY = 'tag';
+
+    private const CLICK_ACTION_KEY = 'click_action';
 
     private ?string $accessToken = null;
 
@@ -54,7 +62,7 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
             throw new RuntimeException('Firebase device token is missing.');
         }
 
-        $payload = $this->resolveData($message, $route);
+        $payload = $this->resolveData($message);
 
         $data = [
             'type' => $message->getType(),
@@ -63,15 +71,24 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
                 : json_encode($payload, JSON_THROW_ON_ERROR),
         ];
 
+        // ⬇️ `notification` = UNIQUEMENT title + body (champs génériques FCM)
+        $notification = [
+            'title' => $this->resolveTitle($message),
+            'body' => $message->getBodyValue(),
+        ];
+
+        // ⬇️ `android.notification` = champs visuels spécifiques Android
+        $androidNotification = $this->resolveAndroidNotification($message);
+
         $fcmPayload = [
-            'message' => [
+            'message' => array_filter([
                 'token' => $deviceToken,
-                'notification' => [
-                    'title' => $this->resolveTitle($message, $route),
-                    'body' => $message->getBodyValue(),
-                ],
+                'notification' => $notification,
+                'android' => $androidNotification === []
+                    ? null
+                    : ['notification' => $androidNotification],
                 'data' => $data,
-            ],
+            ], static fn ($value) => $value !== null),
         ];
 
         $response = Http::withToken($this->accessToken())
@@ -109,41 +126,75 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
         return $credentials['project_id'];
     }
 
-    private function resolveTitle(NotificationMessageVO $message, NotificationRouteVO $route): string
+    private function resolveTitle(NotificationMessageVO $message): string
     {
-        $metadataTitle = $route->getMetadata()?->get(self::TITLE_KEY);
-
-        if (is_string($metadataTitle) && $metadataTitle !== '') {
-            return $metadataTitle;
-        }
-
         $subject = $message->getSubjectValue();
 
         return is_string($subject) && $subject !== '' ? $subject : self::DEFAULT_TITLE;
     }
 
     /**
+     * Construit le bloc `android.notification` de FCM HTTP v1.
+     *
+     * ⚠️ Les champs `icon`, `channel_id`, `sound`, `tag`, `click_action`
+     * ne sont PAS acceptés dans `message.notification` (champs génériques).
+     * Ils doivent aller dans `message.android.notification`.
+     *
      * @return array<string, string>
      */
-    private function resolveData(NotificationMessageVO $message, NotificationRouteVO $route): array
+    private function resolveAndroidNotification(NotificationMessageVO $message): array
     {
-        $payload = [];
+        $metadata = $message->getMetadata();
 
-        $routeData = $route->getMetadata()?->get(self::DATA_KEY);
-
-        // Accept both array and StrictDataObject
-        if ($routeData instanceof StrictDataObject) {
-            $routeData = $routeData->toArray();
+        if ($metadata === null) {
+            return [];
         }
 
-        if (is_array($routeData) && $routeData !== []) {
-            $payload = array_merge($payload, $routeData);
+        $android = [];
+
+        $icon = $metadata->get(self::ICON_KEY);
+        if (is_string($icon) && $icon !== '') {
+            $android['icon'] = $icon;
         }
 
-        $messageData = $message->getData()?->toArray() ?? [];
-        if ($messageData !== []) {
-            $payload = array_merge($payload, $messageData);
+        $image = $metadata->get(self::IMAGE_KEY);
+        if (is_string($image) && $image !== '') {
+            $android['image'] = $image;
         }
+
+        $channelId = $metadata->get(self::CHANNEL_ID_KEY);
+        if (is_string($channelId) && $channelId !== '') {
+            $android['channel_id'] = $channelId;
+        }
+
+        $sound = $metadata->get(self::SOUND_KEY);
+        if (is_string($sound) && $sound !== '') {
+            $android['sound'] = $sound;
+        }
+
+        $tag = $metadata->get(self::TAG_KEY);
+        if (is_string($tag) && $tag !== '') {
+            $android['tag'] = $tag;
+        }
+
+        $clickAction = $metadata->get(self::CLICK_ACTION_KEY);
+        if (is_string($clickAction) && $clickAction !== '') {
+            $android['click_action'] = $clickAction;
+        }
+
+        return $android;
+    }
+
+    /**
+     * Construit `data.payload` depuis `data` du message (payload métier).
+     * Le driver fait `json_encode()` UNE SEULE FOIS sur les valeurs
+     * non scalaires. Ne JAMAIS pré-encoder côté appelant.
+     *
+     * @return array<string, string>
+     */
+    private function resolveData(NotificationMessageVO $message): array
+    {
+        $payload = $message->getData()->toArray();
 
         if ($payload === []) {
             return [];

@@ -16,18 +16,24 @@ class NotificationMessageVO extends AbstractValueObject
 
     public readonly string $type;
 
+    /** ⬇️ Payload métier — va dans `data.payload` côté FCM */
     public readonly StrictDataObject $data;
+
+    /** ⬇️ Champs visuels/optionnels — va dans `notification.*` côté FCM */
+    public readonly ?StrictDataObject $metadata;
 
     public function __construct(
         MessageBodyVO $body,
         MessageSubjectVO $subject,
         string $type = 'default',
         ?StrictDataObject $data = null,
+        ?StrictDataObject $metadata = null,
     ) {
         $this->body = $body;
         $this->subject = $subject;
         $this->type = $type;
         $this->data = $data ?? new StrictDataObject([]);
+        $this->metadata = $metadata;
     }
 
     public function getBody(): MessageBodyVO
@@ -50,6 +56,16 @@ class NotificationMessageVO extends AbstractValueObject
         return $this->data;
     }
 
+    public function getMetadata(): ?StrictDataObject
+    {
+        return $this->metadata;
+    }
+
+    public function hasMetadata(): bool
+    {
+        return $this->metadata !== null && ! $this->metadata->isEmpty();
+    }
+
     public function getBodyValue(): string
     {
         return $this->body->getValue();
@@ -67,6 +83,7 @@ class NotificationMessageVO extends AbstractValueObject
             'subject' => $this->subject->getValue(),
             'type' => $this->type,
             'data' => $this->data->toArray(),
+            'metadata' => $this->metadata?->toArray(),
         ];
     }
 
@@ -80,6 +97,21 @@ class NotificationMessageVO extends AbstractValueObject
             subject: $this->subject,
             type: $this->type,
             data: new StrictDataObject($newData),
+            metadata: $this->metadata,
+        );
+    }
+
+    public function withMetadata(string $key, mixed $value): self
+    {
+        $newMetadata = $this->metadata?->toArray() ?? [];
+        $newMetadata[$key] = $value;
+
+        return new self(
+            body: $this->body,
+            subject: $this->subject,
+            type: $this->type,
+            data: $this->data,
+            metadata: new StrictDataObject($newMetadata),
         );
     }
 

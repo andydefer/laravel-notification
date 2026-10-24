@@ -40,13 +40,10 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
 
         $this->driver = new FirebaseCloudMessagingDriver($this->config);
 
+        // ⬇️ La route ne porte QUE le token — plus aucun champ visuel ni data
         $this->route = new NotificationRouteVO(
             channelClass: FirebaseCloudMessagingChannel::class,
             destination: $this->deviceToken,
-            metadata: new StrictDataObject([
-                'title' => 'Test Title',
-                'data' => ['screen' => 'profile', 'user_id' => '42'],
-            ]),
         );
     }
 
@@ -125,6 +122,7 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
             body: new MessageBodyVO('Ceci est un message envoyé depuis du PHP pur.'),
             subject: new MessageSubjectVO('Bonjour ! 👋'),
             type: 'test',
+            // ⬇️ Valeurs brutes, PAS de json_encode
             data: new StrictDataObject([
                 'screen' => 'profile',
                 'user_id' => '42',
@@ -142,27 +140,72 @@ final class FirebaseCloudMessagingDriverTest extends TestCase
         $this->assertNull($result->error_message);
     }
 
-    public function test_execute_sends_push_notification_with_metadata_data(): void
+    public function test_execute_sends_push_notification_with_visual_metadata(): void
     {
-        $route = new NotificationRouteVO(
-            channelClass: FirebaseCloudMessagingChannel::class,
-            destination: $this->deviceToken,
+        // ⬇️ Les champs visuels vont dans `metadata`, pas dans `data`
+        $message = new NotificationMessageVO(
+            body: new MessageBodyVO('Notification avec métadonnées visuelles.'),
+            subject: new MessageSubjectVO('Titre visuel'),
+            type: 'order_notification',
+            data: new StrictDataObject([
+                'order_id' => '99',
+            ]),
             metadata: new StrictDataObject([
-                'title' => 'Metadata Title',
-                'data' => [
-                    'screen' => 'orders',
-                    'order_id' => '99',
-                ],
+                'icon' => 'ic_notification',
+                'image' => 'https://cdn.afya.com/banner.png',
+                'channel_id' => 'afya_payments',
+                'sound' => 'default',
+                'tag' => 'orders',
             ]),
         );
 
+        $result = $this->driver->send($message, $this->route);
+
+        $this->assertTrue($result->success, sprintf(
+            'Firebase send failed: %s',
+            $result->error_message?->getValue() ?? 'unknown error',
+        ));
+        $this->assertNull($result->error_message);
+    }
+
+    public function test_execute_sends_push_notification_with_complex_data_payload(): void
+    {
+        // ⬇️ Arrays natifs — le driver fait json_encode UNE SEULE FOIS
         $message = new NotificationMessageVO(
-            body: new MessageBodyVO('Notification avec metadata.'),
-            subject: new MessageSubjectVO('Fallback subject'),
-            type: 'order_notification',
+            body: new MessageBodyVO('Notification avec payload complexe.'),
+            subject: new MessageSubjectVO('Payload complexe'),
+            type: 'profile_updated',
+            data: new StrictDataObject([
+                'user_id' => '61',
+                'updated_fields' => ['currency'],           // array → json 1 fois
+                'roles' => ['user', 'admin'],
+                'count' => 3,                       // scalar → cast string
+            ]),
         );
 
-        $result = $this->driver->send($message, $route);
+        $result = $this->driver->send($message, $this->route);
+
+        $this->assertTrue($result->success, sprintf(
+            'Firebase send failed: %s',
+            $result->error_message?->getValue() ?? 'unknown error',
+        ));
+        $this->assertNull($result->error_message);
+    }
+
+    public function test_execute_sends_push_notification_with_empty_metadata(): void
+    {
+        // ⬇️ metadata = null → notification contient juste title + body
+        $message = new NotificationMessageVO(
+            body: new MessageBodyVO('Sans métadonnées visuelles.'),
+            subject: new MessageSubjectVO('Sans metadata'),
+            type: 'test',
+            data: new StrictDataObject([
+                'screen' => 'home',
+            ]),
+            metadata: null,
+        );
+
+        $result = $this->driver->send($message, $this->route);
 
         $this->assertTrue($result->success, sprintf(
             'Firebase send failed: %s',

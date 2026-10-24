@@ -13,13 +13,10 @@ use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
 use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 
 final class WebPushDriverTest extends TestCase
 {
-    use RefreshDatabase;
-
     private string $endpoint;
 
     private string $p256dh;
@@ -55,33 +52,44 @@ final class WebPushDriverTest extends TestCase
         );
     }
 
-    private function makeMessage(): NotificationMessageVO
-    {
+    private function makeMessage(
+        string $body = 'Ceci est un test Web Push.',
+        string $subject = 'Test Web Push',
+        string $type = 'test',
+        ?StrictDataObject $data = null,
+        ?StrictDataObject $metadata = null,
+    ): NotificationMessageVO {
         return new NotificationMessageVO(
-            body: new MessageBodyVO('Ceci est un test Web Push depuis Laravel.'),
-            subject: new MessageSubjectVO('Test Web Push'),
-            type: 'test',
-            data: new StrictDataObject([
-                'screen' => 'home',
-                'url' => '/',
-            ]),
+            body: new MessageBodyVO($body),
+            subject: new MessageSubjectVO($subject),
+            type: $type,
+            data: $data ?? new StrictDataObject(['url' => '/']),
+            metadata: $metadata,
         );
     }
 
-    private function makeRoute(array $metadata = []): NotificationRouteVO
+    private function makeRoute(?StrictDataObject $extraMetadata = null): NotificationRouteVO
     {
+        $baseMetadata = [
+            'endpoint' => $this->endpoint,
+            'p256dh' => $this->p256dh,
+            'auth' => $this->auth,
+        ];
+
+        $merged = $extraMetadata === null
+            ? $baseMetadata
+            : array_merge($baseMetadata, $extraMetadata->toArray());
+
         return new NotificationRouteVO(
             channelClass: WebPushChannel::class,
             destination: $this->endpoint,
-            metadata: new StrictDataObject(array_merge([
-                'endpoint' => $this->endpoint,
-                'p256dh' => $this->p256dh,
-                'auth' => $this->auth,
-                'title' => 'Test Web Push',
-                'data' => ['url' => '/'],
-            ], $metadata)),
+            metadata: new StrictDataObject($merged),
         );
     }
+
+    // ============================================================
+    // Channel + Validation
+    // ============================================================
 
     public function test_get_channel_returns_webpush(): void
     {
@@ -142,6 +150,10 @@ final class WebPushDriverTest extends TestCase
         $driver->send($this->makeMessage(), $this->makeRoute());
     }
 
+    // ============================================================
+    // Basic send
+    // ============================================================
+
     public function test_execute_sends_push_notification(): void
     {
         $driver = new WebPushDriver($this->makeConfig());
@@ -157,20 +169,174 @@ final class WebPushDriverTest extends TestCase
         $this->assertNull($result->error_message);
     }
 
-    public function test_execute_sends_push_notification_with_custom_title(): void
+    // ============================================================
+    // NEW — metadata: TTL
+    // ============================================================
+
+    public function test_execute_with_custom_ttl_from_message_metadata(): void
     {
-        $driver = new WebPushDriver($this->makeConfig());
+        $driver = new WebPushDriver($this->makeConfig(ttl: 3600));
 
-        $route = $this->makeRoute(['title' => 'Custom Title']);
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['ttl' => 60]),
+        );
 
-        $result = $driver->send($this->makeMessage(), $route);
+        $result = $driver->send($message, $this->makeRoute());
 
         $this->assertTrue($result->success, sprintf(
             'Web Push send failed: %s',
             $result->error_message?->getValue() ?? 'unknown error',
         ));
+    }
+
+    public function test_execute_falls_back_to_config_ttl_when_metadata_absent(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig(ttl: 3600));
+
+        $result = $driver->send($this->makeMessage(), $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    public function test_execute_ignores_negative_ttl(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig(ttl: 3600));
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['ttl' => -1]),
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        // Fallback config (3600), pas d'erreur
+        $this->assertTrue($result->success);
+    }
+
+    public function test_execute_ignores_non_int_ttl(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig(ttl: 3600));
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['ttl' => '3600']), // string, pas int
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    // ============================================================
+    // NEW — metadata: urgency
+    // ============================================================
+
+    public function test_execute_with_urgency_high(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig());
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['urgency' => 'high']),
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    public function test_execute_with_urgency_low(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig());
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['urgency' => 'low']),
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    public function test_execute_with_urgency_very_low(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig());
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['urgency' => 'very-low']),
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    public function test_execute_falls_back_to_config_urgency_when_invalid(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig(urgency: 'normal'));
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['urgency' => 'ultra-high']), // invalide
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        // Fallback 'normal', pas d'erreur
+        $this->assertTrue($result->success);
+    }
+
+    // ============================================================
+    // NEW — metadata: topic
+    // ============================================================
+
+    public function test_execute_with_custom_topic(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig());
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['topic' => 'alerts']),
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    public function test_execute_falls_back_to_config_topic_when_empty(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig(topic: 'notification'));
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject(['topic' => '']), // vide
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
+    }
+
+    // ============================================================
+    // NEW — metadata: combiné
+    // ============================================================
+
+    public function test_execute_with_all_transport_options_in_message(): void
+    {
+        $driver = new WebPushDriver($this->makeConfig());
+
+        $message = $this->makeMessage(
+            metadata: new StrictDataObject([
+                'ttl' => 120,
+                'urgency' => 'high',
+                'topic' => 'alerts',
+            ]),
+        );
+
+        $result = $driver->send($message, $this->makeRoute());
+
+        $this->assertTrue($result->success);
         $this->assertNull($result->error_message);
     }
+
+    // ============================================================
+    // Device metadata validation (route)
+    // ============================================================
 
     public function test_execute_fails_when_p256dh_is_missing(): void
     {
@@ -182,6 +348,7 @@ final class WebPushDriverTest extends TestCase
             metadata: new StrictDataObject([
                 'endpoint' => $this->endpoint,
                 'auth' => $this->auth,
+                // p256dh manquant
             ]),
         );
 
@@ -202,6 +369,7 @@ final class WebPushDriverTest extends TestCase
             metadata: new StrictDataObject([
                 'endpoint' => $this->endpoint,
                 'p256dh' => $this->p256dh,
+                // auth manquant
             ]),
         );
 

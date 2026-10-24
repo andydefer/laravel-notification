@@ -14,8 +14,10 @@ use RuntimeException;
 
 final class PusherDriver extends AbstractDriver
 {
+    /** ⬇️ Canal Pusher — spécifique à la route (destination) */
     private const CHANNEL_KEY = 'channel';
 
+    /** ⬇️ Nom d'événement — vient du message (générique) */
     private const EVENT_KEY = 'event';
 
     private const DEFAULT_EVENT = 'notification';
@@ -47,7 +49,7 @@ final class PusherDriver extends AbstractDriver
         }
 
         $channel = $this->resolveChannelName($route);
-        $event = $this->resolveEventName($route);
+        $event = $this->resolveEventName($message);
 
         try {
             $this->client()->trigger($channel, $event, $message->toArray());
@@ -62,6 +64,14 @@ final class PusherDriver extends AbstractDriver
         return true;
     }
 
+    /**
+     * Résout le nom du canal Pusher.
+     *
+     * Priorité :
+     *   1. `$route->metadata->get('channel')` — override explicite
+     *   2. `$route->getDestination()` — canal typé (PusherChannelNameVO)
+     *   3. `$config->default_channel` — fallback global
+     */
     private function resolveChannelName(NotificationRouteVO $route): string
     {
         $channel = $route->getMetadata()?->get(self::CHANNEL_KEY);
@@ -77,9 +87,19 @@ final class PusherDriver extends AbstractDriver
         return $channel;
     }
 
-    private function resolveEventName(NotificationRouteVO $route): string
+    /**
+     * Résout le nom de l'événement Pusher depuis le message.
+     *
+     * ⬇️ Le nom d'événement est un concept du message (générique pour
+     * tous les devices d'un envoi), PAS de la route.
+     *
+     * Priorité :
+     *   1. `$message->getMetadata()->get('event')` — override explicite
+     *   2. `DEFAULT_EVENT` — fallback
+     */
+    private function resolveEventName(NotificationMessageVO $message): string
     {
-        $event = $route->getMetadata()?->get(self::EVENT_KEY);
+        $event = $message->getMetadata()?->get(self::EVENT_KEY);
 
         return is_string($event) && $event !== '' ? $event : self::DEFAULT_EVENT;
     }
