@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Contracts\Configs;
 
+use AndyDefer\LaravelNotification\Records\ApnsConfigRecord;
 use AndyDefer\LaravelNotification\Records\DatabaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
-use AndyDefer\LaravelNotification\Records\PushConfigRecord;
 use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
 use AndyDefer\LaravelNotification\Records\SlackConfigRecord;
 use AndyDefer\LaravelNotification\Records\SmsConfigRecord;
@@ -73,11 +73,11 @@ interface NotificationConfigInterface
     public function getTelegramConfig(): TelegramConfigRecord;
 
     /**
-     * Get the Push notification channel configuration.
+     * Get the APNS (Apple Push Notification service) channel configuration.
      *
-     * @return PushConfigRecord The Push configuration
+     * @return ApnsConfigRecord The APNS configuration
      */
-    public function getPushConfig(): PushConfigRecord;
+    public function getApnsConfig(): ApnsConfigRecord;
 
     /**
      * Get the Pusher channel configuration.
@@ -143,11 +143,11 @@ interface NotificationConfigInterface
     public function isTelegramEnabled(): bool;
 
     /**
-     * Check if Push channel is enabled.
+     * Check if APNS channel is enabled.
      *
-     * @return bool True if Push is enabled, false otherwise
+     * @return bool True if APNS is enabled, false otherwise
      */
-    public function isPushEnabled(): bool;
+    public function isApnsEnabled(): bool;
 
     /**
      * Check if Pusher channel is enabled.

@@ -7,10 +7,6 @@ return [
     |--------------------------------------------------------------------------
     | Default Notification Channels
     |--------------------------------------------------------------------------
-    |
-    | Here you may specify the default notification channels that should be
-    | used when sending notifications.
-    |
     */
     'default_channels' => [
         'mail',
@@ -21,10 +17,6 @@ return [
     |--------------------------------------------------------------------------
     | Channel Configurations
     |--------------------------------------------------------------------------
-    |
-    | Each channel has its own configuration options. You can enable or disable
-    | channels, and set their specific settings.
-    |
     */
     'channels' => [
 
@@ -32,9 +24,6 @@ return [
         |--------------------------------------------------------------------------
         | Mail Channel
         |--------------------------------------------------------------------------
-        |
-        | Configuration for sending email notifications.
-        |
         */
         'mail' => [
             'enabled' => env('MAIL_ENABLED', true),
@@ -44,6 +33,11 @@ return [
             'default_to' => env('MAIL_DEFAULT_TO'),
         ],
 
+        /*
+        |--------------------------------------------------------------------------
+        | Pusher Channel
+        |--------------------------------------------------------------------------
+        */
         'pusher' => [
             'enabled' => env('PUSHER_NOTIFICATION_ENABLED', false),
             'app_id' => env('PUSHER_APP_ID'),
@@ -55,13 +49,11 @@ return [
             'default_channel' => env('PUSHER_NOTIFICATION_CHANNEL', 'notifications'),
             'user_channel_prefix' => env('PUSHER_USER_CHANNEL_PREFIX', 'private-user-'),
         ],
+
         /*
         |--------------------------------------------------------------------------
         | Database Channel
         |--------------------------------------------------------------------------
-        |
-        | Configuration for storing notifications in the database.
-        |
         */
         'database' => [
             'driver' => 'database',
@@ -72,9 +64,6 @@ return [
         |--------------------------------------------------------------------------
         | SMS Channel
         |--------------------------------------------------------------------------
-        |
-        | Configuration for sending SMS notifications via Twilio.
-        |
         */
         'sms' => [
             'enabled' => env('SMS_ENABLED', false),
@@ -88,9 +77,6 @@ return [
         |--------------------------------------------------------------------------
         | WhatsApp Channel
         |--------------------------------------------------------------------------
-        |
-        | Configuration for sending WhatsApp notifications via Meta API.
-        |
         */
         'whatsapp' => [
             'enabled' => env('WHATSAPP_ENABLED', false),
@@ -103,15 +89,17 @@ return [
         |--------------------------------------------------------------------------
         | Slack Channel
         |--------------------------------------------------------------------------
-        |
-        | Configuration for sending Slack notifications.
-        |
         */
         'slack' => [
             'enabled' => env('SLACK_ENABLED', false),
             'webhook_url' => env('SLACK_WEBHOOK_URL'),
         ],
 
+        /*
+        |--------------------------------------------------------------------------
+        | Firebase Cloud Messaging (Android / Web / iOS via FCM)
+        |--------------------------------------------------------------------------
+        */
         'firebase' => [
             // Server-side (admin SDK)
             'enabled' => env('FIREBASE_NOTIFICATION_ENABLED', false),
@@ -131,6 +119,11 @@ return [
             'legacy_key' => env('FIREBASE_KEY'),
         ],
 
+        /*
+        |--------------------------------------------------------------------------
+        | Web Push Channel
+        |--------------------------------------------------------------------------
+        */
         'webpush' => [
             'enabled' => env('WEBPUSH_NOTIFICATION_ENABLED', false),
             'subject' => env('WEBPUSH_SUBJECT', env('APP_URL')),
@@ -140,13 +133,11 @@ return [
             'urgency' => env('WEBPUSH_URGENCY', 'normal'),
             'topic' => env('WEBPUSH_TOPIC', 'notification'),
         ],
+
         /*
         |--------------------------------------------------------------------------
         | Telegram Channel
         |--------------------------------------------------------------------------
-        |
-        | Configuration for sending Telegram notifications.
-        |
         */
         'telegram' => [
             'enabled' => env('TELEGRAM_ENABLED', false),
@@ -156,23 +147,23 @@ return [
 
         /*
         |--------------------------------------------------------------------------
-        | Push Channel
+        | APNS Channel (Apple Push Notification service)
         |--------------------------------------------------------------------------
         |
-        | Configuration for sending push notifications via FCM or APNS.
+        | ⚠️ À IMPLÉMENTER : ApnsDriver est actuellement un squelette.
+        |    Pour iOS, utiliser FirebaseCloudMessagingDriver (qui proxifie vers APNS)
+        |    en attendant une implémentation native.
         |
         */
-        'push' => [
-            'enabled' => env('PUSH_ENABLED', false),
-            'platform' => env('PUSH_PLATFORM', 'fcm'),
-            'fcm_api_key' => env('FCM_API_KEY'),
-            'fcm_project_id' => env('FCM_PROJECT_ID'),
-            'apns_key_path' => env('APNS_KEY_PATH'),
-            'apns_key_id' => env('APNS_KEY_ID'),
-            'apns_team_id' => env('APNS_TEAM_ID'),
-            'apns_bundle_id' => env('APNS_BUNDLE_ID'),
-            'default_sound' => env('PUSH_DEFAULT_SOUND', 'default'),
-            'default_tokens' => [],
+        'apns' => [
+            'enabled' => env('APNS_NOTIFICATION_ENABLED', false),
+            'key_path' => env('APNS_KEY_PATH'),
+            'key_id' => env('APNS_KEY_ID'),
+            'team_id' => env('APNS_TEAM_ID'),
+            'bundle_id' => env('APNS_BUNDLE_ID'),
+            'production' => env('APNS_PRODUCTION', true),
+            'default_sound' => env('APNS_DEFAULT_SOUND', 'default'),
+            'timeout' => env('APNS_TIMEOUT', 30),
         ],
     ],
 
@@ -180,9 +171,6 @@ return [
     |--------------------------------------------------------------------------
     | Logging Configuration
     |--------------------------------------------------------------------------
-    |
-    | Configure how notification events are logged.
-    |
     */
     'logging' => [
         'enabled' => env('NOTIFICATION_LOGGING_ENABLED', true),

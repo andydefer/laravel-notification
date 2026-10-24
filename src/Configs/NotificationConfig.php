@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace AndyDefer\LaravelNotification\Configs;
 
-use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\LaravelNotification\Contracts\Configs\NotificationConfigInterface;
+use AndyDefer\LaravelNotification\Records\ApnsConfigRecord;
 use AndyDefer\LaravelNotification\Records\DatabaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\FirebaseConfigRecord;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
-use AndyDefer\LaravelNotification\Records\PushConfigRecord;
 use AndyDefer\LaravelNotification\Records\PusherConfigRecord;
 use AndyDefer\LaravelNotification\Records\SlackConfigRecord;
 use AndyDefer\LaravelNotification\Records\SmsConfigRecord;
@@ -80,17 +79,15 @@ final class NotificationConfig implements NotificationConfigInterface
         'chat_id' => null,
     ];
 
-    private const DEFAULT_PUSH_CONFIG = [
+    private const DEFAULT_APNS_CONFIG = [
         'enabled' => false,
-        'platform' => 'fcm',
-        'fcm_api_key' => null,
-        'fcm_project_id' => null,
-        'apns_key_path' => null,
-        'apns_key_id' => null,
-        'apns_team_id' => null,
-        'apns_bundle_id' => null,
+        'key_path' => null,
+        'key_id' => null,
+        'team_id' => null,
+        'bundle_id' => null,
+        'production' => true,
         'default_sound' => 'default',
-        'default_tokens' => [],
+        'timeout' => 30,
     ];
 
     private const DEFAULT_PUSHER_CONFIG = [
@@ -173,14 +170,11 @@ final class NotificationConfig implements NotificationConfigInterface
         );
 
         return FirebaseConfigRecord::from([
-            // Server-side
             'enabled' => (bool) ($config['enabled'] ?? false),
             'credentials_path' => $config['credentials_path'] ?? null,
             'project_id' => $config['project_id'] ?? null,
             'scope' => (string) ($config['scope'] ?? 'https://www.googleapis.com/auth/firebase.messaging'),
             'timeout' => (int) ($config['timeout'] ?? 30),
-
-            // Client-side
             'api_key' => $config['api_key'] ?? null,
             'auth_domain' => $config['auth_domain'] ?? null,
             'storage_bucket' => $config['storage_bucket'] ?? null,
@@ -254,15 +248,11 @@ final class NotificationConfig implements NotificationConfigInterface
     /**
      * {@inheritDoc}
      */
-    public function getPushConfig(): PushConfigRecord
+    public function getApnsConfig(): ApnsConfigRecord
     {
-        $config = $this->config->get('notification.channels.push', self::DEFAULT_PUSH_CONFIG);
+        $config = $this->config->get('notification.channels.apns', self::DEFAULT_APNS_CONFIG);
 
-        if (isset($config['default_tokens']) && is_array($config['default_tokens'])) {
-            $config['default_tokens'] = new StrictDataObject($config['default_tokens']);
-        }
-
-        return PushConfigRecord::from($config);
+        return ApnsConfigRecord::from($config);
     }
 
     /**
@@ -310,9 +300,9 @@ final class NotificationConfig implements NotificationConfigInterface
     /**
      * {@inheritDoc}
      */
-    public function isPushEnabled(): bool
+    public function isApnsEnabled(): bool
     {
-        return $this->getPushConfig()->enabled;
+        return $this->getApnsConfig()->enabled;
     }
 
     /**
@@ -371,8 +361,8 @@ final class NotificationConfig implements NotificationConfigInterface
             $channels[] = 'telegram';
         }
 
-        if ($this->isPushEnabled()) {
-            $channels[] = 'push';
+        if ($this->isApnsEnabled()) {
+            $channels[] = 'apns';
         }
 
         if ($this->isPusherEnabled()) {
@@ -381,6 +371,10 @@ final class NotificationConfig implements NotificationConfigInterface
 
         if ($this->isWebPushEnabled()) {
             $channels[] = 'webpush';
+        }
+
+        if ($this->isFirebaseEnabled()) {
+            $channels[] = 'firebase';
         }
 
         return $channels;

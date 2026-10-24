@@ -2,24 +2,31 @@
 
 ## Description
 
-Driver d'envoi d'emails utilisant le système de mail de Laravel (`Illuminate\Support\Facades\Mail`). Il envoie des emails via le driver de mail configuré dans Laravel (SMTP, Sendmail, Mailgun, etc.).
+Driver d'envoi d'emails via le facade `Mail` de Laravel. Transforme un `NotificationMessageVO` et une `NotificationRouteVO` en un email HTML avec pièces jointes optionnelles, CC, BCC, reply-to, priorité et override d'expéditeur.
 
 ## Hiérarchie / Implémentations
 
 ```
-DriverInterface
-    └── AbstractDriver
-            └── MailDriver (final)
+AbstractDriver
+    └── MailDriver
 ```
 
 ## Rôle principal
 
-- Envoie des emails via le système de mail de Laravel
-- Utilise la configuration définie dans `MailConfigRecord`
-- Supporte l'expéditeur par défaut (`default_from`)
-- Gère les sujets et les corps HTML
+Ce driver est le **maillon d'exécution** du canal `MailChannel`. Sa philosophie stricte :
 
----
+- **`$route`** ne porte que la **destination** (`$to`)
+- **`$message`** porte le **contenu** (`subject`, `body`) et les **options** (`metadata`)
+
+Toutes les options de transport (attachments, cc, bcc, reply-to, priority, from override) viennent de `$message->getMetadata()`. La route reste minimaliste : un email, rien d'autre.
+
+## Installation
+
+```bash
+composer require laravel/framework
+```
+
+Configuration Laravel standard dans `config/mail.php`. Le driver utilise `Mail::send()`, donc tous les mailers Laravel (`smtp`, `log`, `array`, `sendmail`, `ses`…) fonctionnent sans modification.
 
 ## API / Méthodes publiques
 
@@ -27,365 +34,245 @@ DriverInterface
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
-| `$config` | `MailConfigRecord` | Configuration du mail (expéditeur, activation, etc.) |
-
-**Retourne :** `void`
-
-**Exceptions :** Aucune
+| `$config` | `MailConfigRecord` | Configuration mail (enabled, default_from, default_from_name) |
 
 **Exemple :**
 ```php
-$config = MailConfigRecord::from([
-    'enabled' => true,
-    'default_from' => 'noreply@example.com',
-    'default_from_name' => 'My App',
-]);
+$config = new MailConfigRecord(
+    enabled: true,
+    default_from: 'noreply@afya.com',
+    default_from_name: 'Afya Medical',
+);
 
 $driver = new MailDriver($config);
 ```
 
 ---
 
-### `send(NotificationMessageVO $message, NotificationRouteVO $route): SendResultRecord`
+### `execute(NotificationMessageVO $message, NotificationRouteVO $route): bool`
 
-*Héritée de `AbstractDriver`*
+**Méthode protégée** héritée d'`AbstractDriver`, exposée via `send()`. Effectue l'envoi réel.
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
-| `$message` | `NotificationMessageVO` | Le message à envoyer |
-| `$route` | `NotificationRouteVO` | La route (doit contenir l'email du destinataire) |
+| `$message` | `NotificationMessageVO` | Message (body, subject, metadata) |
+| `$route` | `NotificationRouteVO` | Route (destination = email) |
 
-**Retourne :** `SendResultRecord` - Résultat de l'envoi
+**Retourne :** `bool` — `true` si l'envoi réussit.
 
-**Exceptions :** `RuntimeException` si la destination est vide
+**Exceptions :**
+- `RuntimeException` — Configuration invalide
+- `RuntimeException` — Destination vide ou non-string
 
 **Exemple :**
 ```php
-$message = new NotificationMessageVO(
-    subject: 'Bienvenue !',
-    content: 'Contenu HTML de l\'email...'
+$route = new NotificationRouteVO(
+    channelClass: MailChannel::class,
+    destination: 'client@afya.com',
 );
 
-$route = new NotificationRouteVO(
-    channelClass: MailDriver::class,
-    destination: 'user@example.com'
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('<h1>Bienvenue</h1>'),
+    subject: new MessageSubjectVO('Bienvenue sur Afya'),
+    type: 'welcome',
 );
 
 $result = $driver->send($message, $route);
+
+if (! $result->success) {
+    Log::error($result->error_message?->getValue());
+}
 ```
 
 ---
 
 ### `getChannel(): string`
 
-| Paramètre | Type | Description |
-|-----------|------|-------------|
-| Aucun | - | - |
-
-**Retourne :** `string` - `'mail'`
-
-**Exceptions :** Aucune
-
-**Exemple :**
-```php
-$channel = $driver->getChannel(); // 'mail'
-```
+**Retourne :** `string` — Toujours `'mail'`.
 
 ---
 
 ### `validateConfiguration(): bool`
 
-| Paramètre | Type | Description |
-|-----------|------|-------------|
-| Aucun | - | - |
-
-**Retourne :** `bool` - `true` si le mail est activé et qu'un expéditeur par défaut est configuré
-
-**Exceptions :** Aucune
+**Retourne :** `bool` — `true` si `enabled=true` et `default_from !== null`.
 
 **Exemple :**
 ```php
-if (!$driver->validateConfiguration()) {
-    throw new \RuntimeException('Mail driver is not properly configured');
+if (! $driver->validateConfiguration()) {
+    throw new RuntimeException('Mail non configuré');
 }
 ```
 
----
+## Options de `metadata`
+
+Toutes les clés ci-dessous sont lues dans `$message->getMetadata()`. Toutes sont **optionnelles**.
+
+| Clé | Type | Description |
+|-----|------|-------------|
+| `attachments` | `string\|array` | Pièces jointes : chemin seul, array de chemins, ou array d'objets `{path, as, mime}` |
+| `cc` | `string\|string[]` | Destinataires en copie |
+| `bcc` | `string\|string[]` | Destinataires en copie cachée |
+| `reply_to` | `string` | Adresse de réponse |
+| `priority` | `int` | Priorité : `1` (haute), `3` (normale), `5` (basse) |
+| `from` | `string` | Override de l'expéditeur |
+| `from_name` | `string` | Nom d'affichage de l'expéditeur |
 
 ## Cas d'utilisation
 
-### Cas 1 : Envoi d'un email de bienvenue
+### Cas 1 : Email simple
+
+Envoi avec les valeurs par défaut de la config.
 
 ```php
-<?php
-
-declare(strict_types=1);
-
-use AndyDefer\LaravelNotification\Drivers\MailDriver;
-use AndyDefer\LaravelNotification\Records\MailConfigRecord;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
-
-$config = MailConfigRecord::from([
-    'enabled' => true,
-    'default_from' => 'welcome@example.com',
-    'default_from_name' => 'My App Team',
-]);
-
-$driver = new MailDriver($config);
-
 $message = new NotificationMessageVO(
-    subject: 'Bienvenue sur notre plateforme !',
-    content: '<h1>Bonjour !</h1><p>Bienvenue sur notre application...</p>'
+    body: new MessageBodyVO('<h1>Bienvenue</h1>'),
+    subject: new MessageSubjectVO('Bienvenue'),
+    type: 'welcome',
 );
 
-$route = new NotificationRouteVO(
-    channelClass: MailDriver::class,
-    destination: 'newuser@example.com'
-);
-
-$result = $driver->send($message, $route);
-
-if ($result->success) {
-    echo "Email de bienvenue envoyé !";
-} else {
-    echo "Erreur : " . $result->error_message->getValue();
-}
+$driver->send($message, $route);
+// from = config.default_from
+// to = route.destination
+// attachments, cc, bcc = aucun
 ```
 
 ---
 
-### Cas 2 : Envoi d'une notification avec le système de canaux
+### Cas 2 : Facture avec pièces jointes
+
+Pièces jointes locales avec renommage et MIME.
 
 ```php
-<?php
-
-declare(strict_types=1);
-
-use AndyDefer\LaravelNotification\Channels\MailChannel;
-use AndyDefer\LaravelNotification\Records\MailConfigRecord;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
-use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
-use Illuminate\Contracts\Config\Repository as ConfigRepository;
-
-$configRecord = MailConfigRecord::from([
-    'enabled' => true,
-    'default_from' => config('mail.from.address'),
-    'default_from_name' => config('mail.from.name'),
-]);
-
-$channel = new MailChannel(
-    configRepository: app(ConfigRepository::class),
-    config: $configRecord
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('<h1>Votre facture</h1>'),
+    subject: new MessageSubjectVO('Facture #1234'),
+    type: 'invoice',
+    metadata: new StrictDataObject([
+        'attachments' => [
+            '/storage/invoices/1234.pdf',
+            [
+                'path' => '/storage/invoices/1234-summary.pdf',
+                'as' => 'résumé.pdf',
+                'mime' => 'application/pdf',
+            ],
+        ],
+        'cc' => ['comptable@afya.com'],
+        'priority' => 1,
+        'from' => 'facturation@afya.com',
+        'from_name' => 'Service Facturation',
+    ]),
 );
 
-$driver = $channel->createDriver();
+$driver->send($message, $route);
+```
 
-$result = $driver->send(
-    new NotificationMessageVO(
-        'Nouveau message',
-        '<p>Vous avez reçu un nouveau message...</p>'
-    ),
-    new NotificationRouteVO(MailDriver::class, 'user@example.com')
+---
+
+### Cas 3 : Notification avec reply-to
+
+Réponse redirigée vers le support, expéditeur normal.
+
+```php
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('<p>Votre ticket a été pris en charge.</p>'),
+    subject: new MessageSubjectVO('Ticket #5678'),
+    type: 'support_ticket',
+    metadata: new StrictDataObject([
+        'reply_to' => 'support@afya.com',
+        'bcc' => 'audit@afya.com',
+    ]),
 );
+
+$driver->send($message, $route);
 ```
-
----
-
-### Cas 3 : Avec pièce jointe (extension possible)
-
-```php
-<?php
-
-// Le driver peut être étendu pour supporter les pièces jointes
-// En surchargeant la méthode execute()
-
-protected function execute(
-    NotificationMessageVO $message,
-    NotificationRouteVO $route
-): bool {
-    // ... code existant ...
-    
-    // Ajout de pièces jointes
-    if ($message->hasAttachments()) {
-        foreach ($message->getAttachments() as $attachment) {
-            $mailMessage->attach(
-                $attachment['path'],
-                ['as' => $attachment['name']]
-            );
-        }
-    }
-    
-    // ... suite ...
-}
-```
-
----
-
-### Cas 4 : Email avec vue Blade
-
-```php
-<?php
-
-// Utilisation avec une vue Blade personnalisée
-protected function execute(
-    NotificationMessageVO $message,
-    NotificationRouteVO $route
-): bool {
-    $to = $route->getDestination();
-    $data = $message->getPayload();
-
-    Mail::send('emails.welcome', $data, function ($mailMessage) use ($to) {
-        $mailMessage->to($to)
-            ->subject('Bienvenue !')
-            ->from('noreply@example.com');
-    });
-
-    return true;
-}
-```
-
----
 
 ## Flux d'exécution
 
 ```
-MailDriver::send(Message, Route)
-    ↓
-AbstractDriver::send()
-    ↓
-MailDriver::before() (hérité)
-    ↓
-MailDriver::execute()
-    ↓
-Mail::send() via Laravel Mail facade
-    ↓
-Envoi de l'email
-    ↓
-MailDriver::after() (hérité)
-    ↓
-SendResultRecord (success: true/false)
+execute()
+  │
+  ├─→ validateConfiguration()     [enabled + default_from]
+  │     └─ si false → RuntimeException
+  │
+  ├─→ route->getDestination()
+  │     └─ si vide/non-string → RuntimeException
+  │
+  ├─→ message->getSubjectValue()  → $subject
+  ├─→ message->getBodyValue()     → $body
+  ├─→ message->getMetadata()      → ?StrictDataObject
+  │
+  ├─→ resolveAttachments($metadata)   → array<{path, options}>
+  ├─→ resolveRecipients($metadata, 'cc')
+  ├─→ resolveRecipients($metadata, 'bcc')
+  ├─→ resolveString($metadata, 'reply_to')
+  ├─→ resolvePriority($metadata)      → ?int (1..5)
+  ├─→ resolveString($metadata, 'from')      ?? config->default_from
+  ├─→ resolveString($metadata, 'from_name') ?? config->default_from_name
+  │
+  └─→ Mail::send([], [], closure($mailMessage))
+        ├─ from($from, $fromName)     si $from non null
+        ├─ to($to)
+        ├─ subject($subject)
+        ├─ html($body)
+        ├─ cc(...) pour chaque $cc
+        ├─ bcc(...) pour chaque $bcc
+        ├─ replyTo($replyTo)          si non null
+        ├─ priority($priority)        si non null
+        └─ attach($path, $options)    pour chaque attachment
 ```
-
----
 
 ## Gestion des erreurs
 
 | Situation | Exception | Message |
 |-----------|-----------|---------|
+| Config incomplète | `RuntimeException` | `Mail configuration is incomplete.` |
 | Destination vide | `RuntimeException` | `Mail destination not specified.` |
-| Configuration invalide | `RuntimeException` (dans `before()`) | `Driver MailDriver configuration is invalid.` |
-| Échec de l'envoi | `Exception` (capturée par `AbstractDriver`) | `[ExceptionClass] - Message` |
+| Destination non-string | `RuntimeException` | `Mail destination not specified.` |
+| Erreur d'envoi Laravel | capturée dans `SendResultRecord.error_message` | (message Laravel) |
 
----
+Le driver **lève** les `RuntimeException` de config/destination. Les erreurs d'envoi (`Mail::send` throw) sont **capturées** par `AbstractDriver::send()` et transformées en `SendResultRecord` avec `success = false`.
 
 ## Intégration
 
-### Avec le système de canaux
-
-```php
-<?php
-
-namespace App\Notifications\Channels;
-
-use AndyDefer\LaravelNotification\Abstracts\AbstractChannel;
-use AndyDefer\LaravelNotification\Drivers\MailDriver;
-use AndyDefer\LaravelNotification\Records\MailConfigRecord;
-use Illuminate\Contracts\Config\Repository as ConfigRepository;
-
-final class MailChannel extends AbstractChannel
-{
-    private MailConfigRecord $config;
-
-    public function __construct(
-        ConfigRepository $configRepository
-    ) {
-        parent::__construct($configRepository);
-        
-        $this->config = MailConfigRecord::from([
-            'enabled' => $this->configRepository->get('mail.enabled', true),
-            'default_from' => $this->configRepository->get('mail.from.address'),
-            'default_from_name' => $this->configRepository->get('mail.from.name'),
-        ]);
-    }
-
-    public function createDriver(): AbstractDriver
-    {
-        if (!$this->config->enabled) {
-            throw new \RuntimeException('Mail is disabled');
-        }
-        
-        return new MailDriver($this->config);
-    }
-}
+```
+MailChannel
+    └── createDriver() → MailDriver
+            ├── dépend de MailConfigRecord (enabled, default_from, default_from_name)
+            ├── consomme NotificationMessageVO (subject, body, metadata)
+            ├── consomme NotificationRouteVO (destination = email)
+            └── utilise Mail::send() (facade Laravel)
+            └── retourne SendResultRecord
 ```
 
-### Avec un service de notification
-
-```php
-<?php
-
-namespace App\Services;
-
-use AndyDefer\LaravelNotification\Drivers\MailDriver;
-use AndyDefer\LaravelNotification\Records\MailConfigRecord;
-
-final class NotificationService
-{
-    private MailDriver $mailDriver;
-
-    public function __construct()
-    {
-        $config = MailConfigRecord::from([
-            'enabled' => true,
-            'default_from' => config('mail.from.address'),
-            'default_from_name' => config('mail.from.name'),
-        ]);
-        
-        $this->mailDriver = new MailDriver($config);
-    }
-
-    public function sendWelcomeEmail(string $email, string $name): void
-    {
-        $message = new NotificationMessageVO(
-            subject: 'Bienvenue !',
-            content: "<h1>Bonjour {$name} !</h1><p>Bienvenue sur notre plateforme...</p>"
-        );
-        
-        $route = new NotificationRouteVO(MailDriver::class, $email);
-        
-        $this->mailDriver->send($message, $route);
-    }
-}
-```
-
----
+Le driver est invoqué par `NotificationSenderProcessor` pour chaque `NotificationRouteVO` dont le canal est `MailChannel`.
 
 ## Performance
 
-| Opération | Complexité | Notes |
-|-----------|------------|-------|
-| `send()` | O(1) + réseau | Dépend du temps d'envoi du serveur SMTP |
-| `validateConfiguration()` | O(1) | Vérification simple |
-| `execute()` | Variable | Dépend du driver de mail configuré |
+| Aspect | Détail |
+|---|---|
+| **Coût réseau** | 1 connexion SMTP par email (pas de batch natif) |
+| **Résolution attachments** | O(n) sur la liste des pièces jointes |
+| **Validation** | O(1) — 2 vérifications simples |
+| **Allocations** | Aucune tant que `Mail::send` n'est pas appelé |
 
-**Optimisations :**
-- Les emails sont envoyés de manière synchrone (par défaut)
-- Peut être rendu asynchrone en utilisant les queues Laravel
-- La configuration est chargée depuis le `MailConfigRecord`
-
----
+Pour envoyer à **N destinataires**, itérer sur N `NotificationRouteVO`. Chaque appel crée une connexion SMTP — utiliser `Mail::queue()` à la place pour de gros volumes (voir section Compatibilité ci-dessous).
 
 ## Compatibilité
 
-| Version | Support |
-|---------|---------|
-| PHP 8.1+ | ✅ Complet |
-| Laravel 10.x | ✅ Complet |
-| Laravel 11.x | ✅ Complet |
-| Laravel 12.x | ✅ Complet |
+| Version PHP | Support |
+|-------------|---------|
+| PHP 8.1+ | ✅ Complet (readonly, promotion, named args) |
+| PHP 8.0 | ✅ Complet |
+| PHP 7.4 | ❌ Non supporté |
 
----
+| Version Laravel | Support |
+|---|---|
+| Laravel 11.x | ✅ Complet |
+| Laravel 10.x | ✅ Complet |
+| Laravel 9.x | ⚠️ Fonctionne mais non testé |
+| Laravel 8.x | ⚠️ `Mail::send()` disponible mais `priority()` peut varier |
+
+**Drivers mail Laravel supportés** : `smtp`, `sendmail`, `ses`, `postmark`, `log`, `array`, `failover`, `roundrobin`.
 
 ## Exemple complet
 
@@ -394,50 +281,65 @@ final class NotificationService
 
 declare(strict_types=1);
 
+use AndyDefer\DomainStructures\Utils\StrictDataObject;
+use AndyDefer\LaravelNotification\Channels\MailChannel;
 use AndyDefer\LaravelNotification\Drivers\MailDriver;
 use AndyDefer\LaravelNotification\Records\MailConfigRecord;
+use AndyDefer\LaravelNotification\ValueObjects\MessageBodyVO;
+use AndyDefer\LaravelNotification\ValueObjects\MessageSubjectVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationMessageVO;
 use AndyDefer\LaravelNotification\ValueObjects\NotificationRouteVO;
 
 // 1. Configuration
-$config = MailConfigRecord::from([
-    'enabled' => true,
-    'default_from' => 'noreply@example.com',
-    'default_from_name' => 'Example App',
-]);
+$config = new MailConfigRecord(
+    enabled: true,
+    default_from: 'noreply@afya.com',
+    default_from_name: 'Afya Medical',
+);
 
-// 2. Création du driver
+// 2. Driver
 $driver = new MailDriver($config);
 
-// 3. Validation de la configuration
-if (!$driver->validateConfiguration()) {
-    throw new \RuntimeException('Mail driver is not properly configured');
-}
-
-// 4. Création du message
-$message = new NotificationMessageVO(
-    subject: 'Vérification de votre compte',
-    content: '<h1>Bonjour !</h1><p>Cliquez sur le lien pour vérifier votre compte :</p><a href="https://example.com/verify">Vérifier</a>'
-);
-
-// 5. Création de la route
+// 3. Route — uniquement la destination
 $route = new NotificationRouteVO(
-    channelClass: MailDriver::class,
-    destination: 'john.doe@example.com'
+    channelClass: MailChannel::class,
+    destination: 'client@example.com',
 );
 
-// 6. Envoi
+// 4. Message — contenu + options via metadata
+$message = new NotificationMessageVO(
+    body: new MessageBodyVO('<h1>Votre facture</h1><p>Voir pièce jointe.</p>'),
+    subject: new MessageSubjectVO('Facture #1234'),
+    type: 'invoice',
+    metadata: new StrictDataObject([
+        'attachments' => [
+            '/storage/invoices/1234.pdf',
+            ['path' => '/storage/invoices/1234-summary.pdf', 'as' => 'résumé.pdf'],
+        ],
+        'cc' => ['comptable@afya.com', 'manager@afya.com'],
+        'bcc' => 'audit@afya.com',
+        'reply_to' => 'support@afya.com',
+        'priority' => 1,
+        'from' => 'facturation@afya.com',
+        'from_name' => 'Service Facturation',
+    ]),
+);
+
+// 5. Envoi
 $result = $driver->send($message, $route);
 
-// 7. Traitement du résultat
-if ($result->success) {
-    echo "Email envoyé avec succès à {$result->destination}\n";
-    echo "Canal : " . $result->channel->getValue() . "\n";
-} else {
-    echo "Échec de l'envoi : " . $result->error_message->getValue() . "\n";
+if (! $result->success) {
+    Log::error('Mail send failed', [
+        'channel' => $result->channel->getValue(),
+        'destination' => $result->destination,
+        'error' => $result->error_message?->getValue(),
+    ]);
+
+    return;
 }
 
-// Résultat attendu :
-// Email envoyé avec succès à john.doe@example.com
-// Canal : mail
+Log::info('Email envoyé', [
+    'destination' => $result->destination,
+    'type' => $message->getType(),
+]);
 ```
