@@ -15,7 +15,7 @@ final class NotificationTaskPayloadRecord extends AbstractRecord
 {
     public function __construct(
         public readonly string $notifiable_type,
-        public readonly int $notifiable_id,
+        public readonly string $notifiable_id,
         public readonly MessageBodyVO $body,
         public readonly MessageSubjectVO $subject,
         public readonly string $type,

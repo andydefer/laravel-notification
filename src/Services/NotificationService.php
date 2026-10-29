@@ -433,17 +433,17 @@ final class NotificationService implements NotificationServiceInterface
         $channels = $options->channels ?? $record->channels ?? new FqcnChannelCollection;
         $limitPerChannel = $options->limitPerChannel ?? $record->limit_per_channel ?? null;
 
-        return new NotificationTaskPayloadRecord(
-            notifiable_type: $notifiable->getMorphClass(),
-            notifiable_id: $notifiable->getKey(),
-            body: $message->getBody(),
-            subject: $message->getSubject(),
-            type: $message->getType(),
-            data: $message->getData(),
-            channels: $channels,
-            limit_per_channel: $limitPerChannel,
-            destination_filter: $options->destinationFilters,
-        );
+        return NotificationTaskPayloadRecord::from([
+            'notifiable_type' => $notifiable->getMorphClass(),
+            'notifiable_id' => $notifiable->getKey(),
+            'body' => $message->getBody(),
+            'subject' => $message->getSubject(),
+            'type' => $message->getType(),
+            'data' => $message->getData(),
+            'channels' => $channels,
+            'limit_per_channel' => $limitPerChannel,
+            'destination_filter' => $options->destinationFilters,
+        ]);
     }
 
     /**

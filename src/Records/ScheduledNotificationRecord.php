@@ -17,7 +17,7 @@ final class ScheduledNotificationRecord extends AbstractRecord
         public readonly string $taskClass,
         public readonly NotificationScheduleType $type,
         public readonly string $notifiable_type,
-        public readonly int $notifiable_id,
+        public readonly string $notifiable_id,
         public readonly NotificationMessageVO $message,
         public readonly ?StringTypedCollection $channels = null,
         public readonly ?DateTimeVO $scheduled_at = null,

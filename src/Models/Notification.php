@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $channel
  * @property string $destination
  * @property string $notifiable_type
- * @property int $notifiable_id
+ * @property string $notifiable_id
  * @property array<string, mixed> $message
  * @property array<string, mixed> $metadata
  * @property NotificationStatus $status
