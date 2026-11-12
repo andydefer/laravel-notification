@@ -18,7 +18,6 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
 {
     private const DEFAULT_TITLE = 'Notification';
 
-    // ⬇️ Clés visuelles Android (vont dans `android.notification`)
     private const ICON_KEY = 'icon';
 
     private const IMAGE_KEY = 'image';
@@ -71,22 +70,35 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
                 : json_encode($payload, JSON_THROW_ON_ERROR),
         ];
 
-        // ⬇️ `notification` = UNIQUEMENT title + body (champs génériques FCM)
-        $notification = [
-            'title' => $this->resolveTitle($message),
-            'body' => $message->getBodyValue(),
-        ];
+        // ⚠️ PING = data-only. Aucun bloc `notification` ni `android.notification`,
+        //    sinon le SDK Firebase affiche la notification lui-même en arrière-plan
+        //    et `onMessageReceived` n'est jamais appelé côté Android.
+        $isPing = $message->getType() === 'ping';
 
-        // ⬇️ `android.notification` = champs visuels spécifiques Android
-        $androidNotification = $this->resolveAndroidNotification($message);
+        $notification = $isPing
+            ? null
+            : [
+                'title' => $this->resolveTitle($message),
+                'body' => $message->getBodyValue(),
+            ];
+
+        $androidNotification = $isPing
+            ? []
+            : $this->resolveAndroidNotification($message);
+
+        $android = null;
+
+        if ($isPing) {
+            $android = ['priority' => 'high'];
+        } elseif ($androidNotification !== []) {
+            $android = ['notification' => $androidNotification];
+        }
 
         $fcmPayload = [
             'message' => array_filter([
                 'token' => $deviceToken,
                 'notification' => $notification,
-                'android' => $androidNotification === []
-                    ? null
-                    : ['notification' => $androidNotification],
+                'android' => $android,
                 'data' => $data,
             ], static fn ($value) => $value !== null),
         ];
@@ -136,10 +148,6 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
     /**
      * Construit le bloc `android.notification` de FCM HTTP v1.
      *
-     * ⚠️ Les champs `icon`, `channel_id`, `sound`, `tag`, `click_action`
-     * ne sont PAS acceptés dans `message.notification` (champs génériques).
-     * Ils doivent aller dans `message.android.notification`.
-     *
      * @return array<string, string>
      */
     private function resolveAndroidNotification(NotificationMessageVO $message): array
@@ -186,10 +194,6 @@ final class FirebaseCloudMessagingDriver extends AbstractDriver
     }
 
     /**
-     * Construit `data.payload` depuis `data` du message (payload métier).
-     * Le driver fait `json_encode()` UNE SEULE FOIS sur les valeurs
-     * non scalaires. Ne JAMAIS pré-encoder côté appelant.
-     *
      * @return array<string, string>
      */
     private function resolveData(NotificationMessageVO $message): array
